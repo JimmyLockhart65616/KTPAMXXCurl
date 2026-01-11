@@ -150,7 +150,8 @@ private:
         }
         else
         {
-            while (amx_curl_.count(handle) > 1)
+            // Fix: count() returns 0 or 1, not > 1
+            while (amx_curl_.count(handle) != 0)
                 handle++;
         }
 

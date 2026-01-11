@@ -2,6 +2,28 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.2.0-ktp] - 2026-01-10
+
+### Critical Segfault Fixes
+
+**Fixed:**
+- **Use-after-free in async socket callbacks** - Raw `SocketData*` pointers passed to ASIO async callbacks could be deleted before callback executed
+  - Changed to `shared_ptr<SocketData>` with `socket_data_map_` tracking
+- **Handle allocation bug** - `count() > 1` always false (count returns 0 or 1), causing handle collisions
+  - Fixed to `count() != 0`
+- **Stale socket map entries** - Non-ARES sockets weren't erased from `socket_map_` on CURL_POLL_REMOVE
+  - Now always erases from socket_map_ regardless of socket type
+- **Unvalidated callback execution** - `MF_ExecuteForward` called without checking callback registration
+  - Added `.count()` validation before all 10 callback functions
+
+**Changed:**
+- `curl_multi_class.h` - Added `SocketDataPtr` typedef and `socket_data_map_` for lifetime management
+- `curl_multi_class.cc` - Refactored socket handling to use shared_ptr
+- `amx_curl_callback_class.cc` - All callback functions now validate registration before execution
+- `amx_curl_manager_class.h` - Fixed handle allocation loop condition
+
+---
+
 ## [1.1.1-ktp] - 2025-12-04
 
 ### KTP Fork - KTPAMXX Integration

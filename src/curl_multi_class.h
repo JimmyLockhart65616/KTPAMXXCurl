@@ -3,6 +3,7 @@
 
 #include <unordered_map>
 #include <set>
+#include <memory>
 #include "asio_poller.h"
 #include "curl_class.h"
 
@@ -11,6 +12,8 @@ struct SocketData
     bool is_ares_socket = false;
     int previous_action = CURL_POLL_NONE; // CURL_POLL_IN, CURL_POLL_OUT, etc
 };
+
+using SocketDataPtr = std::shared_ptr<SocketData>;
 
 class CurlMulti
 {
@@ -32,8 +35,8 @@ public:
 private:
     CurlMulti(const CurlMulti& curl_multi);
     void CheckMultiInfo();
-    void SetSock(int act, curl_socket_t s, SocketData* socketData);
-    void AsioSocketActionCallback(int act, curl_socket_t s, SocketData* socketData, const asio::error_code& error);
+    void SetSock(int act, curl_socket_t s, SocketDataPtr socketData);
+    void AsioSocketActionCallback(int act, curl_socket_t s, SocketDataPtr socketData, const asio::error_code& error);
     void AsioTimerCallback(const asio::error_code& error);
 
 private:
@@ -41,6 +44,7 @@ private:
     AsioPoller& asio_poller_;
     std::unordered_map<CURL*, CurlMulti::CurlPerformComplete> curl_map_;
     std::unordered_map<curl_socket_t, asio::ip::tcp::socket> socket_map_;
+    std::unordered_map<curl_socket_t, SocketDataPtr> socket_data_map_;  // Prevents use-after-free
     std::set<curl_socket_t> removed_sockets_;
     int running_handles_;
 };

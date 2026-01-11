@@ -8,7 +8,20 @@ Part of the [KTP Competitive Infrastructure](https://github.com/afraznein).
 
 ---
 
-## What's New in v1.1.1-ktp
+## What's New in v1.2.0-ktp
+
+### Critical Segfault Fixes
+
+This release fixes several critical memory safety issues that caused server crashes:
+
+- **Use-after-free fix** - Async socket callbacks now use `shared_ptr<SocketData>` instead of raw pointers
+- **Handle allocation fix** - Fixed `count() > 1` bug that caused handle collisions
+- **Socket map cleanup** - Non-ARES sockets now properly removed from tracking maps
+- **Callback validation** - All 10 callback functions now validate registration before execution
+
+---
+
+## v1.1.1-ktp - KTPAMXX Integration
 
 ### No Metamod Required
 

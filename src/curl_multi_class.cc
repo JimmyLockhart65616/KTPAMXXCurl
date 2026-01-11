@@ -111,30 +111,38 @@ int CurlMulti::CurlSocketCallback(CURL* easy, curl_socket_t s, int what, void* s
 {
     DEBUG_LOG("Curl | CurlSocketCallback: socket=%d; what=%s; sockp=%d\n", s, whatstr[what], socketp);
 
-    SocketData* socketData = (SocketData*)socketp;
+    // Use shared_ptr from our map to prevent use-after-free
+    SocketDataPtr socketData;
+    if (socket_data_map_.count(s) > 0)
+    {
+        socketData = socket_data_map_[s];
+    }
 
     if (what == CURL_POLL_REMOVE)
     {
-        if (socketData != nullptr)
+        if (socketData)
         {
             if (socket_map_.find(s) != socket_map_.end())
             {
                 if (socketData->is_ares_socket)
                 {
                     socket_map_.at(s).release();
-                    socket_map_.erase(s);
                 }
+                // Fix: Always erase from socket_map_, not just for ARES sockets
+                socket_map_.erase(s);
             }
 
             removed_sockets_.emplace(s);
-            delete socketData;
+            socket_data_map_.erase(s);  // Remove from our tracking map (ref count drops)
+            curl_multi_assign(curl_multi_, s, nullptr);  // Clear curl's pointer
         }
     }
     else
     {
-        if (socketData == nullptr)
+        if (!socketData)
         {
-            socketData = new SocketData;
+            socketData = std::make_shared<SocketData>();
+            socket_data_map_[s] = socketData;  // Track in our map
 
             if (socket_map_.find(s) == socket_map_.end())
             {
@@ -145,7 +153,8 @@ int CurlMulti::CurlSocketCallback(CURL* easy, curl_socket_t s, int what, void* s
             }
 
             DEBUG_LOG("       Adding SocketData: what=%s; is ares socket: %i\n", whatstr[socketData->previous_action], socketData->is_ares_socket);
-            curl_multi_assign(curl_multi_, s, socketData);
+            // Note: We pass raw pointer to curl but track lifetime ourselves
+            curl_multi_assign(curl_multi_, s, socketData.get());
         }
 
         if (what != CURL_POLL_NONE)
@@ -180,15 +189,15 @@ int CurlMulti::CurlTimerCallback(CURLM* multi, long timeout_ms)
 }
 
 // calls by asio when data r/w is ready
-void CurlMulti::AsioSocketActionCallback(int action, curl_socket_t s, SocketData* socket_data, const asio::error_code& error)
+void CurlMulti::AsioSocketActionCallback(int action, curl_socket_t s, SocketDataPtr socket_data, const asio::error_code& error)
 {
-    if (socket_map_.count(s) == 0)
+    // shared_ptr ensures socket_data is valid even if removed from map
+    if (socket_map_.count(s) == 0 || !socket_data)
     {
         return;
     }
 
     DEBUG_LOG("Asio cb | socket triggered; socket: %d; is_ares_socket: %d; action: %s; prev_action: %s\n", s, socket_data->is_ares_socket, whatstr[action], whatstr[socket_data->previous_action]);
-    //DEBUG_LOG("Asio cb | socket triggered; socket: %d; is_ares_socket: %d\n", s, socket_data->is_ares_socket);
 
     if (error || action == socket_data->previous_action || socket_data->previous_action == CURL_POLL_INOUT)
     {
@@ -205,17 +214,19 @@ void CurlMulti::AsioSocketActionCallback(int action, curl_socket_t s, SocketData
             asio_poller_.get_timer().cancel();
             DEBUG_LOG("          cancel timer (no more handles)\n");
         }
-        
+
         /* keep on watching.
          * the socket may have been closed and/or socket_data may have been changed
          * in curl_multi_socket_action(), so check them both */
         if (   !error
             && !removed_sockets_.count(s)
             && socket_map_.find(s) != socket_map_.end()
+            && socket_data_map_.count(s) > 0  // Verify socket_data still tracked
             && (action == socket_data->previous_action || socket_data->previous_action == CURL_POLL_INOUT))
         {
             auto& tcp_socket = socket_map_.find(s)->second;
 
+            // Pass shared_ptr to async callback - prevents use-after-free
             if (action & CURL_POLL_IN)
                 tcp_socket.async_wait(asio::socket_base::wait_type::wait_read, std::bind(&CurlMulti::AsioSocketActionCallback, this, action, s, socket_data, _1));
 
@@ -263,14 +274,15 @@ void CurlMulti::CheckMultiInfo()
     return;
 }
 
-void CurlMulti::SetSock(int act, curl_socket_t s, SocketData* socket_data)
+void CurlMulti::SetSock(int act, curl_socket_t s, SocketDataPtr socket_data)
 {
     auto it = socket_map_.find(s);
     if (it == socket_map_.end())
-        throw std::runtime_error("Invalid socket " + s);
+        throw std::runtime_error("Invalid socket " + std::to_string(s));
 
     asio::ip::tcp::socket& tcp_socket = it->second;
 
+    // Pass shared_ptr to async callbacks - prevents use-after-free
     if (act == CURL_POLL_IN)
     {
         if (socket_data->previous_action != CURL_POLL_IN && socket_data->previous_action != CURL_POLL_INOUT)

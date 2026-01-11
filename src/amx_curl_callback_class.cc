@@ -99,8 +99,15 @@ size_t CurlCallbackAmx::WriteCallback(char* ptr, size_t size, size_t nmemb)
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_WRITEFUNCTION);
     }
 
+    // Validate callback is registered before executing
+    if (registered_callbacks_.count(CURLOPT_WRITEFUNCTION) == 0)
+    {
+        return size * nmemb;  // Return expected size to continue transfer
+    }
+
     // char *ptr, size_t size, size_t nmemb, void *userdata
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_WRITEFUNCTION], MF_PrepareCharArray(ptr, size * nmemb), size, nmemb, data_[CURLOPT_WRITEDATA]);
+    void* userData = data_.count(CURLOPT_WRITEDATA) ? data_[CURLOPT_WRITEDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_WRITEFUNCTION], MF_PrepareCharArray(ptr, size * nmemb), size, nmemb, userData);
 }
 
 size_t CurlCallbackAmx::ReadCallback(char* buffer, size_t size, size_t nitems)
@@ -111,8 +118,13 @@ size_t CurlCallbackAmx::ReadCallback(char* buffer, size_t size, size_t nitems)
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_READFUNCTION);
     }
 
-    // CURL *handle, int cmd, void *clientp
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_READFUNCTION], MF_PrepareCharArrayA(buffer, size * nitems, true), size, nitems, data_[CURLOPT_READDATA]);
+    if (registered_callbacks_.count(CURLOPT_READFUNCTION) == 0)
+    {
+        return 0;  // No data to read
+    }
+
+    void* userData = data_.count(CURLOPT_READDATA) ? data_[CURLOPT_READDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_READFUNCTION], MF_PrepareCharArrayA(buffer, size * nitems, true), size, nitems, userData);
 }
 
 curlioerr CurlCallbackAmx::IoctlCallback(CURL* handle, int cmd)
@@ -123,8 +135,13 @@ curlioerr CurlCallbackAmx::IoctlCallback(CURL* handle, int cmd)
         return static_cast<curlioerr>(CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_IOCTLFUNCTION));
     }
 
-    // CURL *handle, int cmd, void *clientp
-    return static_cast<curlioerr>(MF_ExecuteForward(registered_callbacks_[CURLOPT_IOCTLFUNCTION], handle, cmd, data_[CURLOPT_IOCTLDATA]));
+    if (registered_callbacks_.count(CURLOPT_IOCTLFUNCTION) == 0)
+    {
+        return CURLIOE_OK;
+    }
+
+    void* userData = data_.count(CURLOPT_IOCTLDATA) ? data_[CURLOPT_IOCTLDATA] : nullptr;
+    return static_cast<curlioerr>(MF_ExecuteForward(registered_callbacks_[CURLOPT_IOCTLFUNCTION], handle, cmd, userData));
 }
 
 int CurlCallbackAmx::SeekCallback(curl_off_t offset, int origin)
@@ -135,9 +152,13 @@ int CurlCallbackAmx::SeekCallback(curl_off_t offset, int origin)
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_SEEKFUNCTION);
     }
 
-    // TODO ���� curl_off_t �� 8 ����?
-    // void *userp, curl_off_t offset, int origin
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_SEEKFUNCTION], data_[CURLOPT_SEEKDATA], offset >> 32, static_cast<int>(offset), origin);
+    if (registered_callbacks_.count(CURLOPT_SEEKFUNCTION) == 0)
+    {
+        return CURL_SEEKFUNC_CANTSEEK;
+    }
+
+    void* userData = data_.count(CURLOPT_SEEKDATA) ? data_[CURLOPT_SEEKDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_SEEKFUNCTION], userData, offset >> 32, static_cast<int>(offset), origin);
 }
 
 int CurlCallbackAmx::SockoptCallback(curl_socket_t curlfd, curlsocktype purpose)
@@ -148,8 +169,13 @@ int CurlCallbackAmx::SockoptCallback(curl_socket_t curlfd, curlsocktype purpose)
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_SOCKOPTFUNCTION);
     }
 
-    // void *clientp, curl_socket_t curlfd, curlsocktype purpose
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_SOCKOPTFUNCTION], data_[CURLOPT_SOCKOPTDATA], curlfd, purpose);
+    if (registered_callbacks_.count(CURLOPT_SOCKOPTFUNCTION) == 0)
+    {
+        return CURL_SOCKOPT_OK;
+    }
+
+    void* userData = data_.count(CURLOPT_SOCKOPTDATA) ? data_[CURLOPT_SOCKOPTDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_SOCKOPTFUNCTION], userData, curlfd, purpose);
 }
 
 int CurlCallbackAmx::ProgressCallback(double dltotal, double dlnow, double ultotal, double ulnow)
@@ -160,8 +186,13 @@ int CurlCallbackAmx::ProgressCallback(double dltotal, double dlnow, double ultot
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_PROGRESSFUNCTION);
     }
 
-    // void *clientp, double dltotal, double dlnow, double ultotal, double ulnow
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_PROGRESSFUNCTION], data_[CURLOPT_PROGRESSDATA], dltotal, dlnow, ultotal, ulnow);
+    if (registered_callbacks_.count(CURLOPT_PROGRESSFUNCTION) == 0)
+    {
+        return 0;  // Continue transfer
+    }
+
+    void* userData = data_.count(CURLOPT_PROGRESSDATA) ? data_[CURLOPT_PROGRESSDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_PROGRESSFUNCTION], userData, dltotal, dlnow, ultotal, ulnow);
 }
 
 size_t CurlCallbackAmx::HeaderCallback(char* buffer, size_t size, size_t nitems)
@@ -172,11 +203,16 @@ size_t CurlCallbackAmx::HeaderCallback(char* buffer, size_t size, size_t nitems)
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_HEADERFUNCTION);
     }
 
-    // char *buffer, size_t size, size_t nitems, void *userdata
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_HEADERFUNCTION], MF_PrepareCharArray(buffer, size * nitems), size, nitems, data_[CURLOPT_HEADERDATA]);
+    if (registered_callbacks_.count(CURLOPT_HEADERFUNCTION) == 0)
+    {
+        return size * nitems;  // Continue transfer
+    }
+
+    void* userData = data_.count(CURLOPT_HEADERDATA) ? data_[CURLOPT_HEADERDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_HEADERFUNCTION], MF_PrepareCharArray(buffer, size * nitems), size, nitems, userData);
 }
 
-int CurlCallbackAmx::DebugCallback(CURL* handle, curl_infotype type, char* data, size_t size)
+int CurlCallbackAmx::DebugCallback(CURL* handle, curl_infotype type, char* debugData, size_t size)
 {
     if (interrupt_)
     {
@@ -184,8 +220,13 @@ int CurlCallbackAmx::DebugCallback(CURL* handle, curl_infotype type, char* data,
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_DEBUGFUNCTION);
     }
 
-    // CURL *handle, curl_infotype type, char *data, size_t size, void *userptr
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_DEBUGFUNCTION], handle, type, MF_PrepareCharArray(data, size), size, data_[CURLOPT_DEBUGDATA]);
+    if (registered_callbacks_.count(CURLOPT_DEBUGFUNCTION) == 0)
+    {
+        return 0;
+    }
+
+    void* userData = data_.count(CURLOPT_DEBUGDATA) ? data_[CURLOPT_DEBUGDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_DEBUGFUNCTION], handle, type, MF_PrepareCharArray(debugData, size), size, userData);
 }
 
 CURLcode CurlCallbackAmx::SslCtxCallback(CURL* curl, void* ssl_ctx)
@@ -196,8 +237,13 @@ CURLcode CurlCallbackAmx::SslCtxCallback(CURL* curl, void* ssl_ctx)
         return static_cast<CURLcode>(CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_SSL_CTX_FUNCTION));
     }
 
-    // CURL *curl, void *ssl_ctx, void *userptr
-    return static_cast<CURLcode>(MF_ExecuteForward(registered_callbacks_[CURLOPT_SSL_CTX_FUNCTION], curl, ssl_ctx, data_[CURLOPT_SSL_CTX_DATA]));
+    if (registered_callbacks_.count(CURLOPT_SSL_CTX_FUNCTION) == 0)
+    {
+        return CURLE_OK;
+    }
+
+    void* userData = data_.count(CURLOPT_SSL_CTX_DATA) ? data_[CURLOPT_SSL_CTX_DATA] : nullptr;
+    return static_cast<CURLcode>(MF_ExecuteForward(registered_callbacks_[CURLOPT_SSL_CTX_FUNCTION], curl, ssl_ctx, userData));
 }
 
 size_t CurlCallbackAmx::InterleaveCallback(void* ptr, size_t size, size_t nmemb)
@@ -208,6 +254,11 @@ size_t CurlCallbackAmx::InterleaveCallback(void* ptr, size_t size, size_t nmemb)
         return static_cast<size_t>(CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_INTERLEAVEFUNCTION));
     }
 
-    // void *ptr, size_t size, size_t nmemb, void *userdata
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_INTERLEAVEFUNCTION], MF_PrepareCharArray(static_cast<char*>(ptr), size * nmemb), size, nmemb, data_[CURLOPT_INTERLEAVEDATA]);
+    if (registered_callbacks_.count(CURLOPT_INTERLEAVEFUNCTION) == 0)
+    {
+        return size * nmemb;  // Continue transfer
+    }
+
+    void* userData = data_.count(CURLOPT_INTERLEAVEDATA) ? data_[CURLOPT_INTERLEAVEDATA] : nullptr;
+    return MF_ExecuteForward(registered_callbacks_[CURLOPT_INTERLEAVEFUNCTION], MF_PrepareCharArray(static_cast<char*>(ptr), size * nmemb), size, nmemb, userData);
 }
