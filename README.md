@@ -1,6 +1,6 @@
 # KTP CURL AMXX
 
-**libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support**
+**Version 1.2.0-ktp** - libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support
 
 A fork of [AmxxCurl](https://github.com/Polarhigh/AmxxCurl) modified to work without Metamod by using KTPAMXX's module frame callback API. Provides full libcurl easy interface functionality with SSL support for making HTTP requests, FTP uploads, and other network operations from AMX plugins.
 
@@ -376,6 +376,13 @@ premake5 clean
 ---
 
 ## Version History
+
+### v1.2.0-ktp (2026-01-10) - Critical Segfault Fixes
+
+- **FIXED: Use-after-free** - Async socket callbacks now use `shared_ptr<SocketData>` instead of raw pointers
+- **FIXED: Handle allocation** - Fixed `count() > 1` bug that caused handle collisions
+- **FIXED: Socket map cleanup** - Non-ARES sockets now properly removed from tracking maps
+- **ADDED: Callback validation** - All 10 callback functions now validate registration before execution
 
 ### v1.1.1-ktp (2025-12-04) - KTPAMXX Integration
 
