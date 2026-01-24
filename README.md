@@ -31,7 +31,7 @@ KTP CURL AMXX operates as a pure AMXX module using KTPAMXX's frame callback API:
 |---------|------------------|---------------|
 | Dependencies | AMX Mod X + Metamod | KTPAMXX only |
 | Frame processing | Metamod StartFrame hook | Module frame callback |
-| Binary | `amxxcurl_amxx_i386.dll` | Same |
+| Binary | `amxxcurl_ktp_i386.dll/so` | KTP renamed |
 | Performance | Standard | Identical |
 | Compatibility | Requires Metamod | No Metamod needed |
 
@@ -82,10 +82,10 @@ Download the latest release from [Releases](https://github.com/afraznein/KTPAmxx
 
 ```bash
 # Windows
-copy amxxcurl_amxx_i386.dll "<game>/addons/ktpamx/modules/"
+copy amxxcurl_ktp_i386.dll "<game>/addons/ktpamx/modules/"
 
 # Linux
-cp amxxcurl_amxx_i386.so "<game>/addons/ktpamx/modules/"
+cp amxxcurl_ktp_i386.so "<game>/addons/ktpamx/modules/"
 ```
 
 ### Step 3: Enable in modules.ini
@@ -93,9 +93,9 @@ cp amxxcurl_amxx_i386.so "<game>/addons/ktpamx/modules/"
 Edit `<game>/addons/ktpamx/configs/modules.ini`:
 ```ini
 ; KTP CURL module
-amxxcurl_amxx_i386.dll  ; Windows
+amxxcurl_ktp_i386.dll  ; Windows
 ; OR
-amxxcurl_amxx_i386.so   ; Linux
+amxxcurl_ktp_i386.so   ; Linux
 ```
 
 ### Step 4: Install Include Files
@@ -301,8 +301,8 @@ make
 ### Build Output
 
 Binaries are placed in `bin/<config>/`:
-- `amxxcurl_amxx_i386.dll` (Windows)
-- `amxxcurl_amxx_i386.so` (Linux)
+- `amxxcurl_ktp_i386.dll` (Windows)
+- `amxxcurl_ktp_i386.so` (Linux)
 
 ### Clean Build
 
