@@ -1,3 +1,13 @@
+/**
+ * KTP CURL AMXX - libcurl wrapper module for AMX Mod X
+ * https://github.com/afraznein/KTPAmxxCurl
+ *
+ * Changelog:
+ *   1.2.1-ktp (2026-01-31) - Forward registration validation & diagnostics
+ *   1.2.0-ktp (2026-01-10) - Critical segfault fixes (shared_ptr, handle allocation, socket cleanup)
+ *   1.1.1-ktp (2025-12-04) - KTPAMXX integration, Metamod removal
+ */
+
 #if defined _curl_included
     #endinput
 #endif

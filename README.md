@@ -1,10 +1,25 @@
 # KTP CURL AMXX
 
-**Version 1.2.0-ktp** - libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support
+**Version 1.2.1-ktp** - libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support
 
 A fork of [AmxxCurl](https://github.com/Polarhigh/AmxxCurl) modified to work without Metamod by using KTPAMXX's module frame callback API. Provides full libcurl easy interface functionality with SSL support for making HTTP requests, FTP uploads, and other network operations from AMX plugins.
 
 Part of the [KTP Competitive Infrastructure](https://github.com/afraznein).
+
+---
+
+## What's New in v1.2.1-ktp
+
+### Forward Registration Validation & Diagnostics
+
+This release fixes silent callback failures that prevented Discord embeds from capturing responses:
+
+- **Forward validation** - `SetupAmxCallback()` now validates `MF_RegisterSPForwardByName` return value
+- **Graceful fallback** - If write callback registration fails, accepts data silently instead of aborting transfer
+- **Diagnostic logging** - `[CURL]` prefixed console messages for registration success/failure
+- **WriteCallback safety** - Double-checks forward ID validity before execution
+
+**Root cause:** `MF_RegisterSPForwardByName` returns -1 when function not found. Previously stored without validation, causing `MF_ExecuteForward(-1)` to return 0, which curl interprets as "abort transfer".
 
 ---
 
@@ -376,6 +391,12 @@ premake5 clean
 ---
 
 ## Version History
+
+### v1.2.1-ktp (2026-01-31) - Forward Registration Validation
+
+- **FIXED: Silent callback failures** - Forward registration now validated before storing
+- **FIXED: Transfer aborts** - WriteCallback returns proper size if forward ID invalid
+- **ADDED: Diagnostic logging** - `[CURL]` prefixed messages for callback registration status
 
 ### v1.2.0-ktp (2026-01-10) - Critical Segfault Fixes
 

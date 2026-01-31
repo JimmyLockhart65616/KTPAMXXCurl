@@ -2,6 +2,30 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.2.1-ktp] - 2026-01-31
+
+### Forward Registration Validation & Diagnostics
+
+**Fixed:**
+- **Silent callback registration failures** - Forward registration could fail silently, causing curl to abort transfers
+  - `MF_RegisterSPForwardByName` returns -1 when function not found, but this was stored anyway
+  - Invalid forward IDs caused `MF_ExecuteForward` to return 0
+  - Curl interpreted 0 from WriteCallback as "abort transfer", preventing completion callback from firing
+  - Result: Discord embeds created but no response captured, HLTV recording commands not processed
+
+**Added:**
+- **Forward registration validation** - Now checks return value and logs error if registration fails
+- **Detailed callback logging** - Logs successful registrations with forward ID and option type
+- **WriteCallback diagnostics** - Logs if forward ID is invalid or if callback returns unexpected value
+- **Graceful fallback** - If write callback registration fails, accepts data silently instead of aborting
+
+**Technical Details:**
+- `SetupAmxCallback()` now validates forward ID before storing
+- `WriteCallback()` double-checks forward ID validity before execution
+- Error messages printed to server console with `[CURL]` prefix for easy grep
+
+---
+
 ## [1.2.0-ktp] - 2026-01-10
 
 ### Critical Segfault Fixes

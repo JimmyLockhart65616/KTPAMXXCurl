@@ -32,61 +32,74 @@ void CurlCallbackAmx::SetupAmxCallback(CURLoption callback_option, const char* a
     if (registered_callbacks_.count(callback_option) > 0)
         MF_UnregisterSPForward(registered_callbacks_[callback_option]);
 
+    AmxForward forwardId = -1;
+
     switch (callback_option)
     {
     case CURLOPT_WRITEFUNCTION:
         // char *ptr, size_t size, size_t nmemb, void *userdata
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_READFUNCTION:
         // char *buffer, size_t size, size_t nitems, void *instream
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_IOCTLFUNCTION:
         // CURL *handle, int cmd, void *clientp
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_SEEKFUNCTION:
         // void *userp, curl_off_t offset, int origin
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL /* high offset*/, FP_CELL /* low offset */, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL /* high offset*/, FP_CELL /* low offset */, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_SOCKOPTFUNCTION:
         // void *clientp, curl_socket_t curlfd, curlsocktype purpose
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_PROGRESSFUNCTION:
         // void *clientp, double dltotal, double dlnow, double ultotal, double ulnow
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_FLOAT, FP_FLOAT, FP_FLOAT, FP_FLOAT, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_FLOAT, FP_FLOAT, FP_FLOAT, FP_FLOAT, FP_DONE);
         break;
 
     case CURLOPT_HEADERFUNCTION:
         // char *buffer, size_t size, size_t nitems, void *userdata
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_DEBUGFUNCTION:
         // CURL *handle, curl_infotype type, char *data, size_t size, void *userptr
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_ARRAY, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_ARRAY, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_SSL_CTX_FUNCTION:
         // CURL *curl, void *ssl_ctx, void *userptr
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     case CURLOPT_INTERLEAVEFUNCTION:
         // void *ptr, size_t size, size_t nmemb, void *userdata
-        registered_callbacks_[callback_option] = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
+        forwardId = MF_RegisterSPForwardByName(amx_, amx_function_name, FP_ARRAY, FP_CELL, FP_CELL, FP_CELL, FP_DONE);
         break;
 
     default:
         throw std::runtime_error("Unsupported option");
     }
+
+    // Validate forward registration succeeded
+    if (forwardId == -1)
+    {
+        MF_PrintSrvConsole("[CURL] ERROR: Failed to register callback '%s' - function not found in plugin\n", amx_function_name);
+        // Don't store invalid forward - leave callback unregistered so we fall back gracefully
+        return;
+    }
+
+    MF_PrintSrvConsole("[CURL] Registered callback '%s' (forward=%d, option=%d)\n", amx_function_name, forwardId, callback_option);
+    registered_callbacks_[callback_option] = forwardId;
 }
 
 
@@ -102,12 +115,31 @@ size_t CurlCallbackAmx::WriteCallback(char* ptr, size_t size, size_t nmemb)
     // Validate callback is registered before executing
     if (registered_callbacks_.count(CURLOPT_WRITEFUNCTION) == 0)
     {
-        return size * nmemb;  // Return expected size to continue transfer
+        // No callback registered - just accept the data and continue
+        return size * nmemb;
+    }
+
+    AmxForward forwardId = registered_callbacks_[CURLOPT_WRITEFUNCTION];
+
+    // Double-check forward ID is valid (should never be -1 if properly registered)
+    if (forwardId < 0)
+    {
+        MF_PrintSrvConsole("[CURL] ERROR: WriteCallback has invalid forward ID %d - accepting data to continue transfer\n", forwardId);
+        return size * nmemb;
     }
 
     // char *ptr, size_t size, size_t nmemb, void *userdata
     void* userData = data_.count(CURLOPT_WRITEDATA) ? data_[CURLOPT_WRITEDATA] : nullptr;
-    return MF_ExecuteForward(registered_callbacks_[CURLOPT_WRITEFUNCTION], MF_PrepareCharArray(ptr, size * nmemb), size, nmemb, userData);
+    cell result = MF_ExecuteForward(forwardId, MF_PrepareCharArray(ptr, size * nmemb), size, nmemb, userData);
+
+    // Log if callback returned unexpected value (could indicate plugin error)
+    size_t expected = size * nmemb;
+    if (result != static_cast<cell>(expected) && result != 0)
+    {
+        MF_PrintSrvConsole("[CURL] WriteCallback returned %d (expected %zu) - transfer may be affected\n", result, expected);
+    }
+
+    return static_cast<size_t>(result);
 }
 
 size_t CurlCallbackAmx::ReadCallback(char* buffer, size_t size, size_t nitems)

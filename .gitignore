@@ -3,6 +3,9 @@ CLAUDE.md
 build_linux.sh
 nul
 
+# SSH/deployment scripts (contain IPs and credentials)
+scripts/
+
 # Build outputs
 bin/
 build/
