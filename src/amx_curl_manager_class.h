@@ -167,9 +167,6 @@ private:
     {
         if (amx_curl_.count(handle) == 0)
             throw CurlAmxManagerInvalidHandleException();
-
-        /*if (curl_tasks_[handle]->is_thread_active())
-            throw std::runtime_error("invalid operation while curl task is active");*/
     }
 
     CurlMulti curl_multi_;

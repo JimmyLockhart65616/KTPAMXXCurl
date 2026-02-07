@@ -392,34 +392,7 @@ premake5 clean
 
 ## Version History
 
-### v1.2.1-ktp (2026-01-31) - Forward Registration Validation
-
-- **FIXED: Silent callback failures** - Forward registration now validated before storing
-- **FIXED: Transfer aborts** - WriteCallback returns proper size if forward ID invalid
-- **ADDED: Diagnostic logging** - `[CURL]` prefixed messages for callback registration status
-
-### v1.2.0-ktp (2026-01-10) - Critical Segfault Fixes
-
-- **FIXED: Use-after-free** - Async socket callbacks now use `shared_ptr<SocketData>` instead of raw pointers
-- **FIXED: Handle allocation** - Fixed `count() > 1` bug that caused handle collisions
-- **FIXED: Socket map cleanup** - Non-ARES sockets now properly removed from tracking maps
-- **ADDED: Callback validation** - All 10 callback functions now validate registration before execution
-
-### v1.1.1-ktp (2025-12-04) - KTPAMXX Integration
-
-- **REMOVED: Metamod dependency** - Now uses KTPAMXX frame callback API
-- **ADDED: MF_RegModuleFrameFunc()** - Module frame callback registration
-- **ADDED: MF_UnregModuleFrameFunc()** - Module frame callback cleanup
-- **MODIFIED: callbacks.cc** - Replaced StartFrame hook with frame callback
-- **MODIFIED: moduleconfig.h** - Disabled USE_METAMOD, updated branding
-- **COMPATIBLE: Original API unchanged** - All natives work identically
-
-### Upstream (Polarhigh/AmxxCurl)
-
-- Full libcurl easy interface wrapper
-- Non-blocking transfers via curl_multi + ASIO
-- SSL/TLS support via OpenSSL
-- Cross-platform Windows/Linux
+See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ---
 
