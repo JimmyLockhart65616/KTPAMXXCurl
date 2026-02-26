@@ -2,6 +2,36 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.1-ktp] - 2026-02-25
+
+### Bug Fixes
+
+**Fixed:**
+- **`curl_easy_unescape` native called escape instead of unescape** — Copy-paste bug in `curl_natives.cc`: `amx_curl_easy_unescape` called `manager.CurlEscapeUrl()` instead of `manager.CurlUnescapeUrl()`. The unescape native was actually escaping URLs.
+- **Server crash when callback function not found** — `curl_easy_perform` only caught `CurlAmxManagerInvalidHandleException` but not `CurlTaskCallbackNotFoundException`. If a plugin passed a non-existent callback function name, the unhandled exception crashed the server and leaked the `data[]` array.
+- **Potential infinite loop on module detach** — `AmxCurl` constructor didn't initialize `is_transfer_in_progress_`, leaving it as garbage. `OnAmxxDetach()` loops `while(!IsAllTransfersCompleted())` — an uninitialized `true` value would cause an infinite hang on server shutdown or map change. All `AmxCurl` members now properly initialized.
+- **Corrupted error messages in `BindCallback`** — `"failture with code " + code` performed pointer arithmetic on the string literal instead of string concatenation. For `CURLcode` values >= 20, this read past the null terminator (undefined behavior). Replaced with `curl_easy_strerror(code)` for proper human-readable error messages.
+
+---
+
+## [1.3.0-ktp] - 2026-02-23
+
+### Built-in Response Body Capture
+
+**Added:**
+- **`curl_get_response_body()` native** - Retrieves the response body captured during an async transfer. When no `CURLOPT_WRITEFUNCTION` Pawn callback is set, the module automatically buffers response data in C++ (`std::string`). Call this native in your completion callback before `curl_easy_cleanup` to read the captured body.
+
+**Why:**
+- The Pawn-level `WRITEFUNCTION` callback path (`MF_ExecuteForward` → `amx_Allot`) can fail silently under memory pressure, writing response data to an uninitialized pointer and corrupting the heap — causing segfaults traced to `discord_curl_write` on production servers (ATL3, ATL4, NY1). Capturing in C++ eliminates the dangerous Pawn callback entirely.
+
+**Technical Details:**
+- `CurlCallbackAmx::WriteCallback()` now appends to `response_body_` when no Pawn callback is registered (previously discarded data)
+- `CurlCallbackAmx::ResetAmxCallbacks()` clears the response body buffer
+- New `AmxCurlManager::CurlGetResponseBody()` accessor method
+- Native copies response body to Pawn buffer via `MF_SetAmxString`
+
+---
+
 ## [1.2.1-ktp] - 2026-01-31
 
 ### Forward Registration Validation & Diagnostics

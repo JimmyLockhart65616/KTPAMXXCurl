@@ -17,7 +17,12 @@ public:
         amx_(amx),
         curl_callback_(std::make_shared<CurlCallbackAmx>(amx)),
         curl_(curl_callback_),
-        curl_multi_(curl_multi)
+        curl_multi_(curl_multi),
+        amx_callback_fun_(0),
+        task_handle_(0),
+        amx_callback_data_(nullptr),
+        amx_callback_data_len_(0),
+        is_transfer_in_progress_(false)
     { }
 
     AmxCurl(AmxCurl&& other) :

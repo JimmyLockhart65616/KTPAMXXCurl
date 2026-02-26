@@ -107,6 +107,12 @@ public:
         amx_curl_.at(handle).get_curl().Reset();
     }
 
+    const std::string& CurlGetResponseBody(AmxCurlHandle handle)
+    {
+        CheckHandle(handle);
+        return amx_curl_.at(handle).get_curl_callback_amx().GetResponseBody();
+    }
+
     void CurlEscapeUrl(AmxCurlHandle handle, const char* url, std::string& out_escaped_url)
     {
         CheckHandle(handle);

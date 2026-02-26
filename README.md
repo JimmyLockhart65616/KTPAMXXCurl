@@ -1,6 +1,6 @@
 # KTP CURL AMXX
 
-**Version 1.2.1-ktp** - libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support
+**Version 1.3.1-ktp** - libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support
 
 A fork of [AmxxCurl](https://github.com/Polarhigh/AmxxCurl) modified to work without Metamod by using KTPAMXX's module frame callback API. Provides full libcurl easy interface functionality with SSL support for making HTTP requests, FTP uploads, and other network operations from AMX plugins.
 
@@ -8,7 +8,22 @@ Part of the [KTP Competitive Infrastructure](https://github.com/afraznein).
 
 ---
 
-## What's New in v1.2.1-ktp
+## What's New in v1.3.1-ktp
+
+### Bug Fixes
+
+- **Fixed `curl_easy_unescape` returning escaped data** — copy-paste bug caused the unescape native to call the escape function
+- **Fixed server crash on invalid callback name** — `curl_easy_perform` with a non-existent callback function now logs an error instead of crashing via unhandled exception
+- **Fixed potential infinite loop on module detach** — uninitialized `is_transfer_in_progress_` flag could cause `OnAmxxDetach` to hang indefinitely
+- **Fixed corrupted error messages in `BindCallback`** — pointer arithmetic on string literal replaced with `curl_easy_strerror()`
+
+## Previous: v1.3.0-ktp
+
+### Built-in Response Body Capture
+
+New `curl_get_response_body()` native eliminates the need for Pawn-level `WRITEFUNCTION` callbacks to capture HTTP response bodies. When no write callback is set, the module automatically buffers response data in C++. This fixes recurring segfaults caused by `MF_ExecuteForward` → `amx_Allot` failures in the Pawn callback path.
+
+## Previous: v1.2.1-ktp
 
 ### Forward Registration Validation & Diagnostics
 

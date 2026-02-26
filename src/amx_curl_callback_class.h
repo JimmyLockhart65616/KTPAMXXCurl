@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <atomic>
 #include <algorithm>
+#include <string>
 
 #include "sdk/amxxmodule.h"
 #include "curl_callback_class.h"
@@ -30,6 +31,9 @@ public:
     void ResetAmxCallbacks();
     void SetupAmxCallback(CURLoption callback_option, const char* amx_function_name);
 
+    const std::string& GetResponseBody() const { return response_body_; }
+    void ClearResponseBody() { response_body_.clear(); }
+
 protected:
     size_t WriteCallback(char* ptr, size_t size, size_t nmemb) override;
     size_t ReadCallback(char* buffer, size_t size, size_t nitems) override;
@@ -46,6 +50,7 @@ private:
     AMX* amx_;
     std::unordered_map<CURLoption, AmxForward, CurlOptionHash> registered_callbacks_;
     std::unordered_map<CURLoption, void*, CurlOptionHash> data_;
+    std::string response_body_;
 
     std::atomic<bool> interrupt_;
 };

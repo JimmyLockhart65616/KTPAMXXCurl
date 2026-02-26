@@ -3,6 +3,7 @@
  * https://github.com/afraznein/KTPAmxxCurl
  *
  * Changelog:
+ *   1.3.0-ktp (2026-02-23) - Built-in response body capture (curl_get_response_body native)
  *   1.2.1-ktp (2026-01-31) - Forward registration validation & diagnostics
  *   1.2.0-ktp (2026-01-10) - Critical segfault fixes (shared_ptr, handle allocation, socket cleanup)
  *   1.1.1-ktp (2025-12-04) - KTPAMXX integration, Metamod removal
@@ -211,3 +212,18 @@ native curl_slist_free_all(curl_slist: list);
  * @noreturn
  */
 native curl_version(buffer[], const maxlen);
+
+/**
+ * Retrieves the response body captured during an async transfer.
+ * Only available when no CURLOPT_WRITEFUNCTION callback was set — the module
+ * automatically buffers the response in C++. Call this in your completion callback
+ * before curl_easy_cleanup.
+ *
+ * @param handle    Curl handle
+ * @param buffer    Buffer to copy response body into
+ * @param maxlen    Maximum buffer size
+ *
+ * @return          Number of bytes copied
+ * @error           If passed curl handle is not valid
+ */
+native curl_get_response_body(const CURL:handle, buffer[], const maxlen);

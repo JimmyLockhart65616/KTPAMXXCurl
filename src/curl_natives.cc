@@ -9,7 +9,7 @@ int g_len;
 // params[1]		CURL handle     cell
 // params[2]		char* url		str
 // params[3]						str ref | escaped url
-// params[4]		int len			cell | размер дестенейшн массива
+// params[4]		int len			cell | пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 static cell AMX_NATIVE_CALL amx_curl_easy_escape(AMX* amx, cell* params)
 {
     AmxCurlManager& manager = AmxCurlController::Instance().get_curl_manager();
@@ -35,8 +35,8 @@ static cell AMX_NATIVE_CALL amx_curl_easy_escape(AMX* amx, cell* params)
 // params[1]		CURL handle		    cell
 // params[2]		char* url			str
 // params[3]							str ref | escaped url
-// params[4]		int len				cell | размер дестенейшн массива
-// ret				int new_len			cell | реальный размер нового массива
+// params[4]		int len				cell | пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+// ret				int new_len			cell | пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 static cell AMX_NATIVE_CALL amx_curl_easy_unescape(AMX* amx, cell* params)
 {
     AmxCurlManager& manager = AmxCurlController::Instance().get_curl_manager();
@@ -47,7 +47,7 @@ static cell AMX_NATIVE_CALL amx_curl_easy_unescape(AMX* amx, cell* params)
     {
         std::string unescaped_str;
         char* str_to_unescape = MF_GetAmxString(amx, params[2], 0, &g_len);
-        manager.CurlEscapeUrl(curl_handle, str_to_unescape, unescaped_str);
+        manager.CurlUnescapeUrl(curl_handle, str_to_unescape, unescaped_str);
 
         MF_SetAmxString(amx, params[3], unescaped_str.c_str(), params[4]);
 
@@ -232,6 +232,12 @@ static cell AMX_NATIVE_CALL amx_curl_easy_perform(AMX* amx, cell* params)
     {
         manager.CurlPerformTask(curl_handle, MF_GetAmxString(amx, params[2], 0, &g_len), data, data_len);
     }
+    catch (const CurlTaskCallbackNotFoundException&)
+    {
+        delete[] data;
+
+        MF_LogError(amx, AMX_ERR_NATIVE, "Callback function not found in plugin");
+    }
     catch (const CurlAmxManagerInvalidHandleException&)
     {
         delete[] data;
@@ -363,6 +369,28 @@ static cell AMX_NATIVE_CALL amx_curl_version(AMX* amx, cell* params)
     return 0;
 }
 
+// params[1]		CURL handle		cell
+// params[2]		buffer[]		string ref
+// params[3]		maxlen			cell
+// ret				bytes copied	cell
+static cell AMX_NATIVE_CALL amx_curl_get_response_body(AMX* amx, cell* params)
+{
+    AmxCurlManager& manager = AmxCurlController::Instance().get_curl_manager();
+    AmxCurlManager::AmxCurlHandle curl_handle = params[1];
+
+    try
+    {
+        const std::string& body = manager.CurlGetResponseBody(curl_handle);
+        return MF_SetAmxString(amx, params[2], body.c_str(), params[3]);
+    }
+    catch (const CurlAmxManagerInvalidHandleException&)
+    {
+        MF_LogError(amx, AMX_ERR_NATIVE, "Invalid curl handle");
+    }
+
+    return 0;
+}
+
 AMX_NATIVE_INFO g_amx_curl_natives[] =
 {
     { "curl_easy_escape",		amx_curl_easy_escape },
@@ -379,5 +407,6 @@ AMX_NATIVE_INFO g_amx_curl_natives[] =
     { "curl_slist_append",		amx_curl_slist_append },
     { "curl_slist_free_all",	amx_curl_slist_free_all },
     { "curl_version",			amx_curl_version },
+    { "curl_get_response_body",	amx_curl_get_response_body },
     { NULL,						NULL },
 };

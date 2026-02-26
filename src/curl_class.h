@@ -78,11 +78,11 @@ public:
         
         code = curl_easy_setopt(curl_, CurlUtils::GetDataOptionForCallbackOption(option), curl_callback_.get());
         if (code != CURLE_OK)
-            throw CurlInvalidOptionException(option, "failture with code " + code);
+            throw CurlInvalidOptionException(option, curl_easy_strerror(code));
 
         code = curl_easy_setopt(curl_, option, CurlCallback::GetMethodPointerForCallbackOption(option));
         if (code != CURLE_OK)
-            throw CurlInvalidOptionException(option, "failture with code " + code);
+            throw CurlInvalidOptionException(option, curl_easy_strerror(code));
     }
 
     CURLcode Perform() const noexcept

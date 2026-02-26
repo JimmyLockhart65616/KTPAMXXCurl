@@ -25,6 +25,7 @@ void CurlCallbackAmx::TryInterrupt()
 void CurlCallbackAmx::ResetAmxCallbacks()
 {
     std::for_each(registered_callbacks_.begin(), registered_callbacks_.end(), [](std::pair<const CURLoption, AmxForward>& pair) { MF_UnregisterSPForward(pair.second); });
+    response_body_.clear();
 }
 
 void CurlCallbackAmx::SetupAmxCallback(CURLoption callback_option, const char* amx_function_name)
@@ -112,10 +113,10 @@ size_t CurlCallbackAmx::WriteCallback(char* ptr, size_t size, size_t nmemb)
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_WRITEFUNCTION);
     }
 
-    // Validate callback is registered before executing
+    // No Pawn callback registered — buffer response body in C++ automatically
     if (registered_callbacks_.count(CURLOPT_WRITEFUNCTION) == 0)
     {
-        // No callback registered - just accept the data and continue
+        response_body_.append(ptr, size * nmemb);
         return size * nmemb;
     }
 
