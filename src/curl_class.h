@@ -130,6 +130,12 @@ private:
 
         if (curl_ == nullptr)
             throw CurlInitFailtureException();
+
+        // Always bind WriteCallback so auto-buffering of response body works.
+        // Without this, curl_get_response_body() returns empty when no Pawn
+        // WRITEFUNCTION is set, because libcurl's default writer bypasses our
+        // C++ WriteCallback entirely.
+        BindCallback(CURLOPT_WRITEFUNCTION);
     }
 
     CURL* curl_;

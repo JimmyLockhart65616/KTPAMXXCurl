@@ -2,6 +2,15 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.2-ktp] - 2026-02-25
+
+### Auto-Buffering Fix
+
+**Fixed:**
+- **`curl_get_response_body()` always returned empty string** — The v1.3.0 auto-buffering feature was broken because `CURLOPT_WRITEFUNCTION` was never bound to the curl handle by default. The C++ `WriteCallback` (which buffers into `response_body_`) only fires if explicitly installed on the handle via `BindCallback()`. Without a Pawn `WRITEFUNCTION` set, `BindCallback` was never called, so libcurl used its default writer (stdout), bypassing the C++ callback entirely. Fixed by calling `BindCallback(CURLOPT_WRITEFUNCTION)` in `Curl::InitCurl()` so the C++ WriteCallback is always installed. Discovered via Discord embed message IDs never being captured (empty response body → `DISCORD_MSG_ID_NOT_FOUND` → all embed updates skipped with `no_msg_id`).
+
+---
+
 ## [1.3.1-ktp] - 2026-02-25
 
 ### Bug Fixes
