@@ -9,7 +9,14 @@ CurlCallbackAmx::CurlCallbackAmx(AMX* amx) :
 
 CurlCallbackAmx::~CurlCallbackAmx()
 {
-    ResetAmxCallbacks();
+    // Only unregister forwards if the AMX is still valid — after plugin unload
+    // the forward IDs reference freed function tables
+    if (IsAmxValid())
+        ResetAmxCallbacks();
+    else
+        registered_callbacks_.clear();
+
+    response_body_.clear();
 }
 
 void CurlCallbackAmx::SetData(CURLoption data_option, void* data)
@@ -25,7 +32,9 @@ void CurlCallbackAmx::TryInterrupt()
 void CurlCallbackAmx::ResetAmxCallbacks()
 {
     std::for_each(registered_callbacks_.begin(), registered_callbacks_.end(), [](std::pair<const CURLoption, AmxForward>& pair) { MF_UnregisterSPForward(pair.second); });
+    registered_callbacks_.clear();
     response_body_.clear();
+    interrupt_ = false;
 }
 
 void CurlCallbackAmx::SetupAmxCallback(CURLoption callback_option, const char* amx_function_name)
@@ -105,19 +114,42 @@ void CurlCallbackAmx::SetupAmxCallback(CURLoption callback_option, const char* a
 
 
 // protected
+
 size_t CurlCallbackAmx::WriteCallback(char* ptr, size_t size, size_t nmemb)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_WRITEFUNCTION);
     }
 
     // No Pawn callback registered — buffer response body in C++ automatically
     if (registered_callbacks_.count(CURLOPT_WRITEFUNCTION) == 0)
     {
-        response_body_.append(ptr, size * nmemb);
-        return size * nmemb;
+        // Cap response body at 64KB to prevent unbounded memory growth
+        static const size_t MAX_RESPONSE_BODY = 65536;
+        size_t incoming = size * nmemb;
+        if (response_body_.size() + incoming > MAX_RESPONSE_BODY)
+        {
+            // Accept remaining capacity, then stop buffering
+            size_t remaining = (response_body_.size() < MAX_RESPONSE_BODY)
+                ? MAX_RESPONSE_BODY - response_body_.size() : 0;
+            if (remaining > 0)
+            {
+                response_body_.append(ptr, remaining);
+                MF_PrintSrvConsole("[CURL] WARNING: Response body reached %zuB cap — truncating further data\n", MAX_RESPONSE_BODY);
+            }
+            // Still return full size to not abort the transfer
+            return incoming;
+        }
+        response_body_.append(ptr, incoming);
+        return incoming;
+    }
+
+    // Validate AMX before calling into Pawn — plugin may have been unloaded mid-transfer
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_WRITEFUNCTION);
     }
 
     AmxForward forwardId = registered_callbacks_[CURLOPT_WRITEFUNCTION];
@@ -147,13 +179,18 @@ size_t CurlCallbackAmx::ReadCallback(char* buffer, size_t size, size_t nitems)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_READFUNCTION);
     }
 
     if (registered_callbacks_.count(CURLOPT_READFUNCTION) == 0)
     {
         return 0;  // No data to read
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_READFUNCTION);
     }
 
     void* userData = data_.count(CURLOPT_READDATA) ? data_[CURLOPT_READDATA] : nullptr;
@@ -164,13 +201,18 @@ curlioerr CurlCallbackAmx::IoctlCallback(CURL* handle, int cmd)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return static_cast<curlioerr>(CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_IOCTLFUNCTION));
     }
 
     if (registered_callbacks_.count(CURLOPT_IOCTLFUNCTION) == 0)
     {
         return CURLIOE_OK;
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return CURLIOE_FAILRESTART;
     }
 
     void* userData = data_.count(CURLOPT_IOCTLDATA) ? data_[CURLOPT_IOCTLDATA] : nullptr;
@@ -181,13 +223,18 @@ int CurlCallbackAmx::SeekCallback(curl_off_t offset, int origin)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_SEEKFUNCTION);
     }
 
     if (registered_callbacks_.count(CURLOPT_SEEKFUNCTION) == 0)
     {
         return CURL_SEEKFUNC_CANTSEEK;
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return CURL_SEEKFUNC_FAIL;
     }
 
     void* userData = data_.count(CURLOPT_SEEKDATA) ? data_[CURLOPT_SEEKDATA] : nullptr;
@@ -198,13 +245,18 @@ int CurlCallbackAmx::SockoptCallback(curl_socket_t curlfd, curlsocktype purpose)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_SOCKOPTFUNCTION);
     }
 
     if (registered_callbacks_.count(CURLOPT_SOCKOPTFUNCTION) == 0)
     {
         return CURL_SOCKOPT_OK;
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return CURL_SOCKOPT_ERROR;
     }
 
     void* userData = data_.count(CURLOPT_SOCKOPTDATA) ? data_[CURLOPT_SOCKOPTDATA] : nullptr;
@@ -215,13 +267,18 @@ int CurlCallbackAmx::ProgressCallback(double dltotal, double dlnow, double ultot
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_PROGRESSFUNCTION);
     }
 
     if (registered_callbacks_.count(CURLOPT_PROGRESSFUNCTION) == 0)
     {
         return 0;  // Continue transfer
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return 1;  // Non-zero aborts transfer
     }
 
     void* userData = data_.count(CURLOPT_PROGRESSDATA) ? data_[CURLOPT_PROGRESSDATA] : nullptr;
@@ -232,13 +289,18 @@ size_t CurlCallbackAmx::HeaderCallback(char* buffer, size_t size, size_t nitems)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_HEADERFUNCTION);
     }
 
     if (registered_callbacks_.count(CURLOPT_HEADERFUNCTION) == 0)
     {
         return size * nitems;  // Continue transfer
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_HEADERFUNCTION);
     }
 
     void* userData = data_.count(CURLOPT_HEADERDATA) ? data_[CURLOPT_HEADERDATA] : nullptr;
@@ -249,12 +311,17 @@ int CurlCallbackAmx::DebugCallback(CURL* handle, curl_infotype type, char* debug
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_DEBUGFUNCTION);
     }
 
     if (registered_callbacks_.count(CURLOPT_DEBUGFUNCTION) == 0)
     {
+        return 0;
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
         return 0;
     }
 
@@ -266,13 +333,18 @@ CURLcode CurlCallbackAmx::SslCtxCallback(CURL* curl, void* ssl_ctx)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return static_cast<CURLcode>(CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_SSL_CTX_FUNCTION));
     }
 
     if (registered_callbacks_.count(CURLOPT_SSL_CTX_FUNCTION) == 0)
     {
         return CURLE_OK;
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return CURLE_ABORTED_BY_CALLBACK;
     }
 
     void* userData = data_.count(CURLOPT_SSL_CTX_DATA) ? data_[CURLOPT_SSL_CTX_DATA] : nullptr;
@@ -283,13 +355,18 @@ size_t CurlCallbackAmx::InterleaveCallback(void* ptr, size_t size, size_t nmemb)
 {
     if (interrupt_)
     {
-        interrupt_ = false;
         return static_cast<size_t>(CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_INTERLEAVEFUNCTION));
     }
 
     if (registered_callbacks_.count(CURLOPT_INTERLEAVEFUNCTION) == 0)
     {
         return size * nmemb;  // Continue transfer
+    }
+
+    if (!IsAmxValid())
+    {
+        interrupt_ = true;
+        return static_cast<size_t>(CurlUtils::GetInterruptCodeForCurlCallback(CURLOPT_INTERLEAVEFUNCTION));
     }
 
     void* userData = data_.count(CURLOPT_INTERLEAVEDATA) ? data_[CURLOPT_INTERLEAVEDATA] : nullptr;

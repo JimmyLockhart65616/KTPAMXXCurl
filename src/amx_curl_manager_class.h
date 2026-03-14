@@ -50,12 +50,32 @@ public:
     {
         CheckHandle(handle);
 
+        // Prevent destruction of an in-flight handle — libcurl still holds a
+        // reference to the easy handle via curl_multi.  Destroying it now would
+        // cause use-after-free when CheckMultiInfo fires the completion callback.
+        if (amx_curl_.at(handle).get_is_transfer_in_progress())
+        {
+            MF_PrintSrvConsole("[CURL] WARNING: curl_easy_cleanup called on handle %d while transfer is in progress — deferring cleanup\n", handle);
+            amx_curl_.at(handle).set_cleanup_deferred();
+            amx_curl_.at(handle).get_curl_callback_amx().TryInterrupt();
+            return;  // Handle will be cleaned up by SweepDeferredCleanups after transfer completes
+        }
+
         amx_curl_.erase(handle);
         FreeCurlHandle(handle);
     }
 
     void RemoveAllTasks()
     {
+        // Remove in-flight transfers from curl_multi before destroying handles.
+        // Without this, curl_easy_cleanup runs while the handle is still attached
+        // to the multi, which is undefined behavior per libcurl docs.
+        for (auto& pair : amx_curl_)
+        {
+            if (pair.second.get_is_transfer_in_progress())
+                curl_multi_.RemoveCurl(pair.second.get_curl());
+        }
+
         amx_curl_.clear();
 
         std::queue<AmxCurlHandle> empty;
@@ -128,6 +148,24 @@ public:
     }
 
     //---------------------------
+
+    // Clean up handles that were deferred because they were in-flight when
+    // curl_easy_cleanup was called.  Should be called periodically (e.g., each frame).
+    void SweepDeferredCleanups()
+    {
+        for (auto it = amx_curl_.begin(); it != amx_curl_.end(); )
+        {
+            if (it->second.get_cleanup_deferred() && !it->second.get_is_transfer_in_progress())
+            {
+                FreeCurlHandle(it->first);
+                it = amx_curl_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
 
     void TryInterruptAllTransfers()
     {

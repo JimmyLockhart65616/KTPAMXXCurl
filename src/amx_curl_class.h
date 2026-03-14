@@ -22,7 +22,8 @@ public:
         task_handle_(0),
         amx_callback_data_(nullptr),
         amx_callback_data_len_(0),
-        is_transfer_in_progress_(false)
+        is_transfer_in_progress_(false),
+        cleanup_deferred_(false)
     { }
 
     AmxCurl(AmxCurl&& other) :
@@ -33,7 +34,9 @@ public:
         task_handle_(other.task_handle_),
         amx_callback_data_(other.amx_callback_data_),
         amx_callback_data_len_(other.amx_callback_data_len_),
-        curl_multi_(other.curl_multi_)
+        curl_multi_(other.curl_multi_),
+        is_transfer_in_progress_(other.is_transfer_in_progress_),
+        cleanup_deferred_(other.cleanup_deferred_)
     { }
 
     void Perform(const char* complete_callback, int task_handle, cell* data, int data_len)
@@ -53,6 +56,8 @@ public:
     }
 
     bool get_is_transfer_in_progress() { return is_transfer_in_progress_; }
+    bool get_cleanup_deferred() { return cleanup_deferred_; }
+    void set_cleanup_deferred() { cleanup_deferred_ = true; }
     Curl& get_curl() { return curl_; }
 
     CurlCallbackAmx& get_curl_callback_amx() const { return *curl_callback_; }
@@ -68,6 +73,20 @@ private:
         int cb_data_len = amx_callback_data_len_;
         int cb_id = amx_callback_fun_;
         int task_handle = task_handle_;
+
+        // Validate AMX pointer before calling registerSPForward.
+        // If the plugin that started this async request was unloaded (e.g., during
+        // a map change), amx_ is stale — amx->base points to freed memory, and
+        // MF_RegisterSPForward would segfault in amx_GetPublic.
+        // MF_FindScriptByAmx does a safe pointer comparison (no dereference) against
+        // the loaded scripts list, returning -1 if the AMX is no longer valid.
+        if (MF_FindScriptByAmx(amx_) == -1)
+        {
+            MF_PrintSrvConsole("[CURL] WARNING: Plugin unloaded during async transfer (AMX %p no longer valid) - skipping completion callback\n", amx_);
+            if (cb_data != nullptr)
+                delete[] cb_data;
+            return;
+        }
 
         int forward_id;
         if (cb_data != nullptr)
@@ -96,6 +115,7 @@ private:
     int amx_callback_data_len_;
 
     bool is_transfer_in_progress_;
+    bool cleanup_deferred_;
 };
 
 #endif // _AMX_CURL_CLASS_H_

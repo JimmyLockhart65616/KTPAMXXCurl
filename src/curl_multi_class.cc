@@ -58,6 +58,11 @@ void CurlMulti::AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback)
     curl.SetOption(CURLOPT_CLOSESOCKETDATA, this);
 
     CURLMcode code = curl_multi_add_handle(curl_multi_, curl.get_handle());
+    if (code != CURLM_OK)
+    {
+        DEBUG_LOG("Curl | ERROR: curl_multi_add_handle failed: %s\n", curl_multi_strerror(code));
+        curl_map_.erase(curl.get_handle());
+    }
 }
 
 void CurlMulti::RemoveCurl(Curl& curl)

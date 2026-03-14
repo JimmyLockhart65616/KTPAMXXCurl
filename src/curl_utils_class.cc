@@ -6,7 +6,7 @@ int CurlUtils::GetInterruptCodeForCurlCallback(CURLoption callback_option)
     switch (callback_option) {
     case CURLOPT_WRITEFUNCTION:         return 0;
     case CURLOPT_READFUNCTION:          return CURL_READFUNC_ABORT;
-    case CURLOPT_IOCTLFUNCTION:         return CURLIOE_UNKNOWNCMD;
+    case CURLOPT_IOCTLFUNCTION:         return CURLIOE_FAILRESTART;
     case CURLOPT_SEEKFUNCTION:          return 1;
     case CURLOPT_SOCKOPTFUNCTION:       return 1;
     case CURLOPT_OPENSOCKETFUNCTION:    return CURL_SOCKET_BAD;

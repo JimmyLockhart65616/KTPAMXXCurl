@@ -2,6 +2,45 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.5-ktp] - 2026-03-14
+
+### Async Safety + POSTFIELDS Fix
+
+**Fixed:**
+- **`CURLOPT_POSTFIELDS` used stale pointer during async perform** — `MF_GetAmxString` returns a pointer to a static internal buffer that gets overwritten on the next call. For async `Perform`, libcurl reads the POST data later when the buffer is stale, sending corrupted or unrelated data. Now auto-upgrades `CURLOPT_POSTFIELDS` to `CURLOPT_COPYPOSTFIELDS`, which makes libcurl copy the data immediately.
+- **`RemoveAllTasks` left handles attached to curl_multi** — `curl_easy_cleanup` ran while handles were still in the multi, which is undefined behavior per libcurl docs. Now removes all in-flight handles from curl_multi before destroying them.
+- **IOCTL interrupt code incorrect** — `CURLIOE_UNKNOWNCMD` tells libcurl the command is unknown; `CURLIOE_FAILRESTART` correctly signals a failed restart, which triggers proper abort handling.
+- **`curl_multi_add_handle` failures silent** — Return code was unchecked. Now logs error and cleans up the curl map entry on failure.
+- **`curl_formadd` static aliasing risk** — Changed from `static char[14][16384]` to heap allocation (`new`/`delete`). Static storage with `CURLFORM_PTRCONTENTS` could alias across concurrent calls; heap allocation ensures each invocation gets its own buffers.
+
+---
+
+## [1.3.4-ktp] - 2026-03-12
+
+### In-Flight Callback Safety
+
+**Fixed:**
+- **Segfault from stale AMX in mid-transfer callbacks** — `WriteCallback`, `HeaderCallback`, `ReadCallback`, and all other libcurl callbacks called `MF_ExecuteForward` without checking if the plugin was still loaded. If a map change unloaded a plugin during a slow HTTP response, the next callback would dereference a stale AMX pointer. All 10 callback methods now check `IsAmxValid()` before calling into Pawn, aborting the transfer cleanly via the interrupt mechanism if the plugin is gone.
+- **Move constructor omitted `is_transfer_in_progress_`** — The `AmxCurl` move constructor did not copy `is_transfer_in_progress_`, leaving it uninitialized (undefined behavior). The primary constructor set it to `false`, but after move-construction into the handle map, the value was garbage. This could cause `IsAllTransfersCompleted()` to return false indefinitely, hanging `OnAmxxDetach`. Now properly copied in the move initializer list.
+- **`OnAmxxDetach` spin-wait could hang indefinitely** — The detach cleanup loop polled `IsAllTransfersCompleted()` without first interrupting in-flight transfers. A stuck or slow transfer (DNS timeout, hung upstream) would block server shutdown forever. Now calls `TryInterruptAllTransfers()` before the loop, with a 5000-poll timeout as a safety bound.
+- **`RemoveTask` on in-flight handle caused use-after-free** — `curl_easy_cleanup` from Pawn during an active transfer destroyed the `AmxCurl` object while libcurl still held a reference to the easy handle. The next `CheckMultiInfo` call would fire the completion callback on freed memory. Now checks `is_transfer_in_progress` and interrupts instead of destroying, deferring cleanup to the completion callback.
+- **Destructor called `MF_UnregisterSPForward` on stale forwards** — `~CurlCallbackAmx` unconditionally unregistered all Pawn forwards, but after plugin unload the forward IDs reference freed function tables. Now checks `IsAmxValid()` first — if invalid, clears the map without calling AMXX.
+- **Response body grew unbounded** — Auto-buffered response bodies (`response_body_`) had no size limit. A misbehaving endpoint returning megabytes would accumulate it all in heap memory. Now capped at 64KB — sufficient for Discord API responses while preventing memory exhaustion.
+- **`curl_formadd` 224KB stack allocation** — `char strings[14][16384]` allocated 224KB on the stack. Changed to `static` storage to move out of the stack frame while keeping the correct 16384 buffer size (matching KTPAMXX's `MAX_BUFFER_LENGTH`).
+- **Deferred cleanup for in-flight handles** — `RemoveTask` now marks handles with `cleanup_deferred_` instead of silently leaking them. `SweepDeferredCleanups()` runs each frame and erases completed deferred handles, preventing unbounded growth of `amx_curl_` on long-running servers.
+- **Detach timeout warning logged actual poll count** — Previously printed hardcoded `0` instead of the actual poll count reached.
+
+---
+
+## [1.3.3-ktp] - 2026-03-10
+
+### Stale AMX Pointer Validation
+
+**Fixed:**
+- **Segfault when plugin unloaded during async transfer** -- When an async HTTP request completes (`OnPerformComplete`), the module calls `MF_RegisterSPForward(amx, func)` to invoke the Pawn callback. If the plugin that started the request was unloaded during the async operation (e.g., during a map change), the stored AMX pointer is stale and `amx->base` points to freed memory, causing a segfault in `amx_GetPublic`. Now validates the AMX pointer via `MF_FindScriptByAmx()` before registering the forward. If the plugin is no longer loaded, the callback is skipped with a warning logged to the server console.
+
+---
+
 ## [1.3.2-ktp] - 2026-02-25
 
 ### Auto-Buffering Fix

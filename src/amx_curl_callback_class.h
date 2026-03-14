@@ -34,6 +34,9 @@ public:
     const std::string& GetResponseBody() const { return response_body_; }
     void ClearResponseBody() { response_body_.clear(); }
 
+    // Check if the AMX pointer is still valid (plugin not unloaded)
+    bool IsAmxValid() const { return MF_FindScriptByAmx(amx_) != -1; }
+
 protected:
     size_t WriteCallback(char* ptr, size_t size, size_t nmemb) override;
     size_t ReadCallback(char* buffer, size_t size, size_t nitems) override;

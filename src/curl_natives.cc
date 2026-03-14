@@ -112,7 +112,16 @@ static cell AMX_NATIVE_CALL amx_curl_easy_setopt(AMX* amx, cell* params)
                 return manager.CurlSetOption(curl_handle, option, reinterpret_cast<curl_slist*>(*MF_GetAmxAddr(amx, params[3])));
 
             default:
-                return manager.CurlSetOption(curl_handle, option, MF_GetAmxString(amx, params[3], 0, &g_len));
+            {
+                char* str = MF_GetAmxString(amx, params[3], 0, &g_len);
+                // MF_GetAmxString returns a pointer to a static internal buffer that gets
+                // overwritten on the next call.  CURLOPT_POSTFIELDS stores the pointer and
+                // reads it later during async perform — by which time the buffer is stale.
+                // CURLOPT_COPYPOSTFIELDS makes libcurl copy the data immediately.
+                if (option == CURLOPT_POSTFIELDS)
+                    option = CURLOPT_COPYPOSTFIELDS;
+                return manager.CurlSetOption(curl_handle, option, str);
+            }
             }
         }
 
@@ -316,7 +325,9 @@ static cell AMX_NATIVE_CALL amx_curl_formadd(AMX* amx, cell* params)
         return -1;
     }
 
-    char strings[14][16384];
+    // MF_GetAmxString returns from a 16384-byte internal buffer (KTPAMXX MAX_BUFFER_LENGTH).
+    // Heap-allocate to avoid 224KB stack usage and static aliasing risk with CURLFORM_PTRCONTENTS.
+    char (*strings)[16384] = new char[14][16384];
 
     curl_forms* forms = new curl_forms[pairs + 1];
     for (i = 0; i < pairs; i++)
@@ -330,7 +341,8 @@ static cell AMX_NATIVE_CALL amx_curl_formadd(AMX* amx, cell* params)
 
     CURLFORMcode code = curl_formadd(first, last, CURLFORM_ARRAY, forms, CURLFORM_END);
 
-    delete[] forms; // pairs + 1
+    delete[] forms;
+    delete[] strings;
 
     return code;
 }

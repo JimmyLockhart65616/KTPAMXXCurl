@@ -10,6 +10,7 @@ extern AMX_NATIVE_INFO g_amx_curl_natives[];
 void CurlFrameCallback()
 {
     AmxCurlController::Instance().get_asio_poller().Poll();
+    AmxCurlController::Instance().get_curl_manager().SweepDeferredCleanups();
 }
 
 // amxmodx
@@ -43,11 +44,22 @@ void OnAmxxDetach()
     if (MF_UnregModuleFrameFunc)
         MF_UnregModuleFrameFunc(CurlFrameCallback);
 
-    // Wait for all transfers to complete and clean up
+    // Interrupt all in-flight transfers and wait for completion with timeout
     // (Replaces Metamod's ServerDeactivate callback)
     AmxCurlManager& manager = AmxCurlController::Instance().get_curl_manager();
 
-    while(!manager.IsAllTransfersCompleted())
+    manager.TryInterruptAllTransfers();
+
+    int timeout_polls = 0;
+    static const int MAX_DETACH_POLLS = 5000;  // ~5 seconds at typical poll rate
+    while(!manager.IsAllTransfersCompleted() && timeout_polls < MAX_DETACH_POLLS)
+    {
         AmxCurlController::Instance().get_asio_poller().Poll();
+        timeout_polls++;
+    }
+
+    if (timeout_polls >= MAX_DETACH_POLLS)
+        MF_PrintSrvConsole("[CURL] WARNING: Detach timeout after %d polls, forcing cleanup\n", timeout_polls);
+
     manager.RemoveAllTasks();
 }

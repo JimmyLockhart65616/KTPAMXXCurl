@@ -1,6 +1,6 @@
 # KTP CURL AMXX
 
-**Version 1.3.2-ktp** - libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support
+**Version 1.3.5-ktp** - libcurl wrapper module for AMX Mod X with non-blocking async HTTP/FTP support
 
 A fork of [AmxxCurl](https://github.com/Polarhigh/AmxxCurl) modified to work without Metamod by using KTPAMXX's module frame callback API. Provides full libcurl easy interface functionality with SSL support for making HTTP requests, FTP uploads, and other network operations from AMX plugins.
 
@@ -8,11 +8,31 @@ Part of the [KTP Competitive Infrastructure](https://github.com/afraznein).
 
 ---
 
-## What's New in v1.3.2-ktp
+## What's New in v1.3.5-ktp
 
-### Auto-Buffering Fix
+### Async Safety + POSTFIELDS Fix
 
-- **Fixed `curl_get_response_body()` always returning empty** — The C++ WriteCallback was never installed on the curl handle by default, so libcurl's default writer bypassed the auto-buffering path entirely. Now binds `CURLOPT_WRITEFUNCTION` at init time. This fixes Discord embed score updates (message ID was never captured from empty response body).
+- **`CURLOPT_POSTFIELDS` auto-upgraded to `CURLOPT_COPYPOSTFIELDS`** — Prevents stale pointer reads from `MF_GetAmxString` static buffer during async perform
+- **`RemoveAllTasks` detach safety** — Removes handles from curl_multi before destroying, preventing undefined behavior
+- **IOCTL interrupt code corrected** — `CURLIOE_UNKNOWNCMD` → `CURLIOE_FAILRESTART`
+- **`curl_multi_add_handle` error logging** — Now checks return code and logs on failure
+- **`curl_formadd` heap allocation** — Static aliasing risk with `CURLFORM_PTRCONTENTS` eliminated
+
+## Previous: v1.3.4-ktp
+
+### In-Flight Callback Safety
+
+- **AMX validity checks in all libcurl callbacks** — All 10 callback methods now verify the plugin is still loaded before calling into Pawn, preventing segfaults from stale AMX pointers during slow transfers across map changes
+- **Deferred cleanup for in-flight handles** — `curl_easy_cleanup` on an active transfer now interrupts and defers destruction instead of causing use-after-free
+- **Detach timeout** — Module detach now interrupts all transfers before waiting, with a poll timeout to prevent indefinite hangs
+- **Response body cap** — Auto-buffered responses capped at 64KB with truncation warning
+- **Move constructor fix** — `is_transfer_in_progress_` now properly copied, preventing UB
+
+## Previous: v1.3.3-ktp
+
+### Stale AMX Pointer Validation
+
+- **Fixed segfault when plugin unloaded during async transfer** -- Validates AMX pointer via `MF_FindScriptByAmx()` before invoking the completion callback.
 
 ## Previous: v1.3.1-ktp
 
