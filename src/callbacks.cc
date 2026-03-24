@@ -1,4 +1,5 @@
 #include <curl/curl.h>
+#include <chrono>
 #include "sdk/amxxmodule.h"
 #include "amx_curl_controller_class.h"
 #include "asio_poller.h"
@@ -50,16 +51,17 @@ void OnAmxxDetach()
 
     manager.TryInterruptAllTransfers();
 
-    int timeout_polls = 0;
-    static const int MAX_DETACH_POLLS = 5000;  // ~5 seconds at typical poll rate
-    while(!manager.IsAllTransfersCompleted() && timeout_polls < MAX_DETACH_POLLS)
+    // Wall-clock timeout: poll until all transfers complete or 5 seconds elapse
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while(!manager.IsAllTransfersCompleted() && std::chrono::steady_clock::now() < deadline)
     {
         AmxCurlController::Instance().get_asio_poller().Poll();
-        timeout_polls++;
     }
 
-    if (timeout_polls >= MAX_DETACH_POLLS)
-        MF_PrintSrvConsole("[CURL] WARNING: Detach timeout after %d polls, forcing cleanup\n", timeout_polls);
+    if (!manager.IsAllTransfersCompleted())
+        MF_PrintSrvConsole("[CURL] WARNING: Detach timeout after 5s, forcing cleanup\n");
 
     manager.RemoveAllTasks();
+
+    curl_global_cleanup();
 }

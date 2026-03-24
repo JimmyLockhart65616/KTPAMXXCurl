@@ -2,6 +2,16 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.6-ktp] - 2026-03-24
+
+### Fixed
+- **`curl_global_cleanup` added to `OnAmxxDetach`** — `curl_global_init` was called on attach but `curl_global_cleanup` was never called on detach. On a long-running server with frequent map changes, the unpaired init/cleanup calls leaked SSL/OpenSSL state and OS resolver threads.
+- **`curl_formadd` params array bounds check** — The `CURLFORM_END` sentinel scan had no upper bound on the params array index. Malformed plugin calls without a terminating `CURLFORM_END` could read past the end of the params array. Now checks against the actual param count.
+- **`OnAmxxDetach` timeout uses wall-clock** — The interrupt-and-drain loop used an iteration counter (~5000 polls) as a proxy for 5 seconds, but `io_context_.poll()` returns immediately when no I/O is ready, making the counter exhaust in microseconds. Now uses `std::chrono::steady_clock` for a real 5-second wall-clock deadline.
+- **`CurlReset` re-binds WriteCallback** — `curl_easy_reset` removes all options including `CURLOPT_WRITEFUNCTION`. After reset, the auto-buffering WriteCallback (needed for `curl_get_response_body`) was lost. Now re-binds it after every reset.
+
+---
+
 ## [1.3.5-ktp] - 2026-03-14
 
 ### Async Safety + POSTFIELDS Fix

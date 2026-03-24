@@ -125,6 +125,8 @@ public:
 
         amx_curl_.at(handle).get_curl_callback_amx().ResetAmxCallbacks();
         amx_curl_.at(handle).get_curl().Reset();
+        // curl_easy_reset removes WRITEFUNCTION — re-bind so response_body_ buffering works
+        amx_curl_.at(handle).get_curl().BindCallback(CURLOPT_WRITEFUNCTION);
     }
 
     const std::string& CurlGetResponseBody(AmxCurlHandle handle)

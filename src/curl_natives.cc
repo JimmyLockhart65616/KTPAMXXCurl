@@ -316,7 +316,8 @@ static cell AMX_NATIVE_CALL amx_curl_formadd(AMX* amx, cell* params)
     curl_httppost** last = reinterpret_cast<curl_httppost**>(MF_GetAmxAddr(amx, params[2]));
 
     int i = 3, pairs = 0;
-    while (static_cast<CURLformoption>(*MF_GetAmxAddr(amx, params[i])) != CURLFORM_END) { i += 2; pairs++; }
+    int paramCount = static_cast<int>(params[0] / sizeof(cell));
+    while (i <= paramCount && static_cast<CURLformoption>(*MF_GetAmxAddr(amx, params[i])) != CURLFORM_END) { i += 2; pairs++; }
 
     if (pairs == 0 || pairs > 14)
     {
