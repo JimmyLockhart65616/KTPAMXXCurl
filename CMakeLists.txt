@@ -21,7 +21,7 @@ else()
 endif()
 
 # Architecture
-set(COMPILE_FLAGS "${COMPILE_FLAGS} -march=native -mtune=native -std=c++14 -fPIC")
+set(COMPILE_FLAGS "${COMPILE_FLAGS} -march=ivybridge -mtune=haswell -std=c++14 -fPIC")
 
 # Defines
 add_definitions(
@@ -34,6 +34,7 @@ add_definitions(
 
 # Sources
 set(SOURCES
+	src/amx_curl_callback_class.cc
 	src/asio_poller.cc
 	src/callbacks.cc
 	src/curl_multi_class.cc
