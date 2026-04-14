@@ -244,14 +244,18 @@ static cell AMX_NATIVE_CALL amx_curl_easy_perform(AMX* amx, cell* params)
     catch (const CurlTaskCallbackNotFoundException&)
     {
         delete[] data;
-
         MF_LogError(amx, AMX_ERR_NATIVE, "Callback function not found in plugin");
     }
     catch (const CurlAmxManagerInvalidHandleException&)
     {
         delete[] data;
-
         MF_LogError(amx, AMX_ERR_NATIVE, "Invalid curl handle");
+    }
+    catch (...)
+    {
+        // KTP: Catch-all to prevent data leak on unexpected exceptions
+        delete[] data;
+        MF_LogError(amx, AMX_ERR_NATIVE, "Unexpected error during curl perform");
     }
 
     return 0;
@@ -333,13 +337,17 @@ static cell AMX_NATIVE_CALL amx_curl_formadd(AMX* amx, cell* params)
     curl_forms* forms = new curl_forms[pairs + 1];
     for (i = 0; i < pairs; i++)
     {
-        strcpy(strings[i], MF_GetAmxString(amx, params[i * 2 + 4], 0, &g_len));
+        // KTP: strncpy instead of strcpy — prevent buffer overflow from oversized AMX strings
+        strncpy(strings[i], MF_GetAmxString(amx, params[i * 2 + 4], 0, &g_len), 16383);
+        strings[i][16383] = '\0';
 
         forms[i].option = static_cast<CURLformoption>(*MF_GetAmxAddr(amx, params[i * 2 + 3]));
         forms[i].value = strings[i];
     }
     forms[pairs].option = CURLFORM_END;
 
+    // KTP: curl_formadd with CURLFORM_ARRAY copies the forms struct but stores pointers
+    // to the form values. The strings buffer must stay alive until this call completes.
     CURLFORMcode code = curl_formadd(first, last, CURLFORM_ARRAY, forms, CURLFORM_END);
 
     delete[] forms;

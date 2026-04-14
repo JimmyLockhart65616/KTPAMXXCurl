@@ -90,6 +90,8 @@ project "AmxxCurl"
     toolset "gcc"
     linkgroups "On"
     linkoptions { "-static-libgcc -static-libstdc++ -Wl,--no-as-needed" }
+    buildoptions { "-march=native", "-mtune=native", "-flto", "-fno-math-errno" }
+    linkoptions { "-flto" }
 
 --[[ 
 bild libcurl win:

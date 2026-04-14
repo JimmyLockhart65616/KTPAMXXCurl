@@ -2,6 +2,21 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.7-ktp] - 2026-04-02
+
+### Changed
+- **Build system migrated to CMake** — Replaced Premake5 + generated Makefiles with a single `CMakeLists.txt`. Consistent with KTP-ReHLDS and KTP-ReAPI build systems.
+- **Compiler optimizations** — `-O3 -march=native -mtune=native -flto -fno-math-errno` for CPU-specific instructions and link-time optimization.
+
+### Fixed
+- **Buffer overflow in `amx_curl_formadd`** — `strcpy` replaced with `strncpy` + null terminator. `MF_GetAmxString` could return strings larger than the 16384-byte buffer, causing heap overflow.
+- **Memory leak in `amx_curl_easy_perform`** — Added catch-all exception handler to prevent `data` array leak on unexpected exceptions during `CurlPerformTask`.
+- **Exception in libcurl callback (`SetSock`)** — Replaced `throw std::runtime_error` with graceful return + debug log. Throwing from a libcurl socket callback is undefined behavior and can crash the server.
+- **Exception safety in `AddCurl`** — Reordered operations to set curl options before inserting into `curl_map_`. If `SetOption` throws, the handle is no longer orphaned in the map.
+- **CPU busy-spin during detach** — Added 10ms sleep in the poll loop during module unload. Without sleep, `io_context::poll()` returns immediately when no I/O is ready, causing the loop to spin at 100% CPU for up to 5 seconds.
+
+---
+
 ## [1.3.6-ktp] - 2026-03-24
 
 ### Fixed

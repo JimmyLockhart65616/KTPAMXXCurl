@@ -1,5 +1,6 @@
 #include <curl/curl.h>
 #include <chrono>
+#include <thread>
 #include "sdk/amxxmodule.h"
 #include "amx_curl_controller_class.h"
 #include "asio_poller.h"
@@ -56,6 +57,7 @@ void OnAmxxDetach()
     while(!manager.IsAllTransfersCompleted() && std::chrono::steady_clock::now() < deadline)
     {
         AmxCurlController::Instance().get_asio_poller().Poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));  // KTP: Avoid busy-spin during shutdown
     }
 
     if (!manager.IsAllTransfersCompleted())

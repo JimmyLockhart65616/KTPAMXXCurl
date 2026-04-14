@@ -50,12 +50,14 @@ CurlMulti::~CurlMulti()
 
 void CurlMulti::AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback)
 {
-    curl_map_.emplace(curl.get_handle(), callback);
-
+    // KTP: Set options before inserting into map — if SetOption throws,
+    // we don't leave an orphaned handle in curl_map_
     curl.SetOption(CURLOPT_OPENSOCKETFUNCTION, &CurlOpenSocketCallbackStatic);
     curl.SetOption(CURLOPT_OPENSOCKETDATA, this);
     curl.SetOption(CURLOPT_CLOSESOCKETFUNCTION, &CurlCloseSocketCallbackStatic);
     curl.SetOption(CURLOPT_CLOSESOCKETDATA, this);
+
+    curl_map_.emplace(curl.get_handle(), callback);
 
     CURLMcode code = curl_multi_add_handle(curl_multi_, curl.get_handle());
     if (code != CURLM_OK)
@@ -283,7 +285,12 @@ void CurlMulti::SetSock(int act, curl_socket_t s, SocketDataPtr socket_data)
 {
     auto it = socket_map_.find(s);
     if (it == socket_map_.end())
-        throw std::runtime_error("Invalid socket " + std::to_string(s));
+    {
+        // KTP: Graceful return instead of exception — this runs inside a libcurl callback
+        // where throwing is undefined behavior. Socket may have been closed between events.
+        DEBUG_LOG("Curl | WARNING: SetSock called for unknown socket %d, ignoring\n", s);
+        return;
+    }
 
     asio::ip::tcp::socket& tcp_socket = it->second;
 
