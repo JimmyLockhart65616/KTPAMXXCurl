@@ -188,8 +188,14 @@ int CurlMulti::CurlTimerCallback(CURLM* multi, long timeout_ms)
     }
     else if (timeout_ms == 0)
     {
-        curl_multi_socket_action(curl_multi_, CURL_SOCKET_TIMEOUT, 0, &running_handles_);
-        CheckMultiInfo();
+        // timeout_ms==0 means "act immediately", but we may be inside a libcurl callback
+        // (e.g. curl_multi_add_handle), so calling curl_multi_socket_action here would be
+        // a recursive API call (CURLM_RECURSIVE_API_CALL). Post to io_context so it fires
+        // on the next Poll() call instead, outside of any libcurl callback.
+        asio_poller_.get_io_context().post([this]() {
+            curl_multi_socket_action(curl_multi_, CURL_SOCKET_TIMEOUT, 0, &running_handles_);
+            CheckMultiInfo();
+        });
     }
 
     return 0;
