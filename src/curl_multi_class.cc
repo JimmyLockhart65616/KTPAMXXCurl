@@ -46,6 +46,11 @@ CurlMulti::CurlMulti(AsioPoller& asio_poller) :
 CurlMulti::~CurlMulti()
 {
     curl_multi_cleanup(curl_multi_);
+    // Null out so any asio handler that captured `this` and runs after
+    // destruction (e.g. a lambda posted from CurlTimerCallback, or a pending
+    // async_wait on the asio timer) can early-return instead of dereferencing
+    // a freed CURLM*. See CurlTimerCallback and AsioTimerCallback for guards.
+    curl_multi_ = nullptr;
 }
 
 void CurlMulti::AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback)
@@ -193,6 +198,10 @@ int CurlMulti::CurlTimerCallback(CURLM* multi, long timeout_ms)
         // a recursive API call (CURLM_RECURSIVE_API_CALL). Post to io_context so it fires
         // on the next Poll() call instead, outside of any libcurl callback.
         asio_poller_.get_io_context().post([this]() {
+            // Guard: ~CurlMulti() sets curl_multi_ = nullptr; skip the call if
+            // the posted task fires after destruction (e.g. another Poll() runs
+            // between the drain loop exit in OnAmxxDetach and RemoveAllTasks).
+            if (curl_multi_ == nullptr) return;
             curl_multi_socket_action(curl_multi_, CURL_SOCKET_TIMEOUT, 0, &running_handles_);
             CheckMultiInfo();
         });
@@ -257,6 +266,10 @@ void CurlMulti::AsioTimerCallback(const asio::error_code& error)
         //std::cout << "asio timer cb error: " << error.value() << " text: " << error.message() << std::endl;
         return;
     }
+
+    // Guard: async_wait binds `this`; if the timer fires after ~CurlMulti() ran
+    // (e.g. during shutdown), curl_multi_ will be nullptr — skip the call.
+    if (curl_multi_ == nullptr) return;
 
     DEBUG_LOG("Asio cb | timer triggered\n");
 
