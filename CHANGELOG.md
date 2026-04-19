@@ -2,6 +2,15 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.8-ktp] - 2026-04-19
+
+### Fixed
+- **`CURLM_RECURSIVE_API_CALL` when `timeout_ms == 0`** (PR #1 by JimmyLockhart65616) — `CurlTimerCallback` fires synchronously from inside libcurl callbacks (notably `curl_multi_add_handle`). Calling `curl_multi_socket_action` directly in that context is rejected by libcurl as a recursive API call (rc=8), so transfers never progressed and user callbacks never fired on high-RPS streams. Fix posts the socket-action to the asio `io_context` so it runs on the next `Poll()` outside any libcurl callback. Observed while wiring the DoD HUD Observer ingest path at ~50 events/sec.
+- **UAF guard on `this`-captured asio handlers** (PR #2) — The lambda posted in the `timeout_ms == 0` branch and the existing `async_wait(std::bind(&CurlMulti::AsioTimerCallback, this, _1))` in the `timeout_ms > 0` branch both capture `this`. If either runs after `~CurlMulti()` (e.g. if any `Poll()` fires between the drain loop exit and `RemoveAllTasks` during `OnAmxxDetach`), the `curl_multi_` member would already be cleaned up. `~CurlMulti()` now sets `curl_multi_ = nullptr` and both handlers early-return on null. Defensive — no current code path reaches this, but it removes a footgun for future shutdown-path changes.
+- **`moduleconfig.h` `MODULE_VERSION` was frozen at `1.3.6-ktp`** — missed during the 1.3.7 release; the module was self-identifying as `1.3.6-ktp` in logs and plugin-info messages despite the binary containing 1.3.7 code. Now tracks the real version.
+
+---
+
 ## [1.3.7-ktp] - 2026-04-02
 
 ### Changed
