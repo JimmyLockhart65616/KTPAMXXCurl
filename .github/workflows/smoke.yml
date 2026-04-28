@@ -1,0 +1,39 @@
+# KTP Tier 1 — Build-time smoke for KTPAmxxCurl
+#
+# Catches the 2026-04-14 regression class — KTPAmxxCurl missing source file
+# / broken CMakeLists / symbol breakage causes amxxcurl_ktp_i386.so to
+# silently fail to load on the game server, cascading every plugin that uses
+# ktp_discord.inc into "bad load."
+#
+# Implementation lives in the reusable workflow at
+# KTPInfrastructure/.github/workflows/smoke-callable.yml. This file is just
+# the trigger + assertion configuration.
+#
+# See KTPInfrastructure/tests/smoke/README.md for the full design.
+
+name: Tier 1 Smoke
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    uses: ${{ github.repository_owner }}/KTPInfrastructure/.github/workflows/smoke-callable.yml@main
+    with:
+      under_test_label: KTPAmxxCurl
+      under_test_kind: cpp_module
+      make_build_target: build-curl
+      artifact_host_path: KTPInfrastructure/artifacts/ci/ktpamx/modules/amxxcurl_ktp_i386.so
+      artifact_container_path: /opt/hlds/dod/addons/ktpamx/modules/amxxcurl_ktp_i386.so
+      assert_module: amxxcurl
+    secrets:
+      ktp_checkout_token: ${{ secrets.KTP_CHECKOUT_TOKEN }}
