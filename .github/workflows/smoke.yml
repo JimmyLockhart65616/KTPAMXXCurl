@@ -31,6 +31,10 @@ jobs:
     with:
       under_test_label: KTPAmxxCurl
       under_test_kind: cpp_module
+      # GitHub repo is `KTPAMXXCurl` (different casing) but Makefile +
+      # build/curl/Dockerfile expect the local-convention `KTPAmxxCurl/`.
+      # Pin the local checkout path so build context matches.
+      caller_repo_path: KTPAmxxCurl
       make_build_target: build-curl
       artifact_host_path: KTPInfrastructure/artifacts/ci/ktpamx/modules/amxxcurl_ktp_i386.so
       artifact_container_path: /opt/hlds/dod/addons/ktpamx/modules/amxxcurl_ktp_i386.so
