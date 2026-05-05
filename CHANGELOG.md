@@ -2,6 +2,13 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.9-ktp] - 2026-05-05
+
+### Fixed
+- **Shutdown SIGSEGV in `~CurlCallbackAmx()` after KTPAMXX core unmap** — When a curl request was still in flight at engine `quit` and the 5-second drain in `OnAmxxDetach` couldn't reach a clean state (or an asio handler held a `shared_ptr<CurlCallbackAmx>` past `RemoveAllTasks`), the callback object survived into the `AmxCurlController` Meyers singleton's static-destructor phase. Its destructor calls `IsAmxValid()`, which calls `MF_FindScriptByAmx(amx_)` — an indirect call through `g_fn_FindAmxScriptByAmx`. By that point KTPAMXX core's `.text` is already unmapped, so the call jumps into a freed page and segfaults. Hit on ATL1 27015 (2026-05-04 03:00:08 EDT) and DEN5 27019 (2026-05-05 03:00:13 EDT) at the scheduled-restart window, with byte-identical relative offsets in the amxxcurl module — confirmed root cause via `objdump -d` at offset `0x965d6`. Trigger correlated with HLTV proxy's 03:00:01-03 reconnect cron priming a Discord/HLStatsX POST that landed in the unsafe window. Fix: module-level `std::atomic<bool> g_amxxcurl_detached`, set at the very end of `OnAmxxDetach`. `IsAmxValid()` and `OnPerformComplete()` now short-circuit on it before any `MF_*` call, so late destructors take their safe `registered_callbacks_.clear()` branch and never dereference the stale function pointer. No behavior change at gameplay time. See `docs/INVESTIGATION_shutdown_race_2026-05-04.md`.
+
+---
+
 ## [1.3.8-ktp] - 2026-04-19
 
 ### Fixed

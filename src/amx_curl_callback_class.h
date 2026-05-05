@@ -9,6 +9,13 @@
 #include "sdk/amxxmodule.h"
 #include "curl_callback_class.h"
 
+// Set true at the end of OnAmxxDetach. After this point any MF_* function
+// pointer (including MF_FindScriptByAmx) may resolve into freed pages —
+// KTPAMXX core can be unmapped before our Meyers-singleton destructors
+// finish running. Late ~CurlCallbackAmx() / OnPerformComplete() callers
+// must short-circuit before any MF_* call.
+extern std::atomic<bool> g_amxxcurl_detached;
+
 class CurlCallbackAmx : public CurlCallback
 {
     using AmxForward = int;
@@ -34,8 +41,16 @@ public:
     const std::string& GetResponseBody() const { return response_body_; }
     void ClearResponseBody() { response_body_.clear(); }
 
-    // Check if the AMX pointer is still valid (plugin not unloaded)
-    bool IsAmxValid() const { return MF_FindScriptByAmx(amx_) != -1; }
+    // Check if the AMX pointer is still valid (plugin not unloaded).
+    // Short-circuits when the module is detached: MF_FindScriptByAmx is
+    // an indirect call through g_fn_FindAmxScriptByAmx, which goes stale
+    // once KTPAMXX core is unmapped (see g_amxxcurl_detached comment).
+    bool IsAmxValid() const
+    {
+        if (g_amxxcurl_detached.load(std::memory_order_acquire))
+            return false;
+        return MF_FindScriptByAmx(amx_) != -1;
+    }
 
 protected:
     size_t WriteCallback(char* ptr, size_t size, size_t nmemb) override;

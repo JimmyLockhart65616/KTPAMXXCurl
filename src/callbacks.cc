@@ -1,11 +1,18 @@
 #include <curl/curl.h>
 #include <chrono>
 #include <thread>
+#include <atomic>
 #include "sdk/amxxmodule.h"
+#include "amx_curl_callback_class.h"
 #include "amx_curl_controller_class.h"
 #include "asio_poller.h"
 
 extern AMX_NATIVE_INFO g_amx_curl_natives[];
+
+// See declaration in amx_curl_callback_class.h. Set at the very end of
+// OnAmxxDetach so late destructors (Meyers singleton during .fini, asio
+// handlers that captured a shared_ptr) can short-circuit before any MF_*.
+std::atomic<bool> g_amxxcurl_detached{false};
 
 // KTP: Frame callback for async cURL processing
 // This replaces Metamod's StartFrame callback
@@ -66,4 +73,16 @@ void OnAmxxDetach()
     manager.RemoveAllTasks();
 
     curl_global_cleanup();
+
+    // Past this point, KTPAMXX core may be unmapped at any moment. Any
+    // MF_* call from a late destructor (e.g. AmxCurlController's Meyers
+    // singleton during .fini, or an asio handler firing after RemoveAllTasks)
+    // would dereference a stale function pointer. Setting the detach flag
+    // makes IsAmxValid() and OnPerformComplete short-circuit cleanly into
+    // their no-op branches.
+    //
+    // Fixes shutdown SIGSEGV at module offset 0x965d6 (CurlCallbackAmx
+    // destructor's MF_FindScriptByAmx call). See
+    // docs/INVESTIGATION_shutdown_race_2026-05-04.md.
+    g_amxxcurl_detached.store(true, std::memory_order_release);
 }

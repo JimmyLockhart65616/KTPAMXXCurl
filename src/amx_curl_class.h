@@ -74,6 +74,18 @@ private:
         int cb_id = amx_callback_fun_;
         int task_handle = task_handle_;
 
+        // Short-circuit if the module has detached — MF_FindScriptByAmx
+        // itself is an indirect call through a function pointer that goes
+        // stale once KTPAMXX core is unmapped during shutdown. Drop the
+        // request silently; we cannot even print a warning, since
+        // MF_PrintSrvConsole is also stale at this point.
+        if (g_amxxcurl_detached.load(std::memory_order_acquire))
+        {
+            if (cb_data != nullptr)
+                delete[] cb_data;
+            return;
+        }
+
         // Validate AMX pointer before calling registerSPForward.
         // If the plugin that started this async request was unloaded (e.g., during
         // a map change), amx_ is stale — amx->base points to freed memory, and
