@@ -9,11 +9,13 @@
 #include "sdk/amxxmodule.h"
 #include "curl_callback_class.h"
 
-// Set true at the end of OnAmxxDetach. After this point any MF_* function
-// pointer (including MF_FindScriptByAmx) may resolve into freed pages —
-// KTPAMXX core can be unmapped before our Meyers-singleton destructors
-// finish running. Late ~CurlCallbackAmx() / OnPerformComplete() callers
-// must short-circuit before any MF_* call.
+// Set true in OnAmxxDetach AFTER the in-flight transfer drain loop exits
+// but BEFORE manager.RemoveAllTasks() (1.3.10 ordering — was post-cleanup
+// in 1.3.9 which left a window for shared_ptr<CurlCallbackAmx> escapees).
+// After the store, any MF_* function pointer (including MF_FindScriptByAmx)
+// may resolve into freed pages — KTPAMXX core can be unmapped before our
+// Meyers-singleton destructors finish running. Late ~CurlCallbackAmx() /
+// OnPerformComplete() callers must short-circuit before any MF_* call.
 extern std::atomic<bool> g_amxxcurl_detached;
 
 class CurlCallbackAmx : public CurlCallback

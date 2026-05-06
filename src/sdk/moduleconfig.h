@@ -15,7 +15,7 @@
  *   to add multiple entries.
  */
 #define MODULE_NAME "KTP CURL AMXX"
-#define MODULE_VERSION "1.3.9-ktp"
+#define MODULE_VERSION "1.3.10-ktp"
 #define MODULE_AUTHOR "Polarhigh / KTP"
 #define MODULE_URL "https://github.com/afraznein/KTPAMXXCurl"
 #define MODULE_LOGTAG "CURL"

@@ -9,9 +9,10 @@
 
 extern AMX_NATIVE_INFO g_amx_curl_natives[];
 
-// See declaration in amx_curl_callback_class.h. Set at the very end of
-// OnAmxxDetach so late destructors (Meyers singleton during .fini, asio
-// handlers that captured a shared_ptr) can short-circuit before any MF_*.
+// See declaration in amx_curl_callback_class.h. Set after the in-flight
+// drain loop exits but BEFORE RemoveAllTasks (1.3.10 ordering) so every
+// destructor fired during teardown — including any shared_ptr escapees in
+// late asio handlers — atomically sees detached=true and skips MF_*.
 std::atomic<bool> g_amxxcurl_detached{false};
 
 // KTP: Frame callback for async cURL processing
@@ -70,19 +71,25 @@ void OnAmxxDetach()
     if (!manager.IsAllTransfersCompleted())
         MF_PrintSrvConsole("[CURL] WARNING: Detach timeout after 5s, forcing cleanup\n");
 
-    manager.RemoveAllTasks();
-
-    curl_global_cleanup();
-
-    // Past this point, KTPAMXX core may be unmapped at any moment. Any
-    // MF_* call from a late destructor (e.g. AmxCurlController's Meyers
-    // singleton during .fini, or an asio handler firing after RemoveAllTasks)
-    // would dereference a stale function pointer. Setting the detach flag
-    // makes IsAmxValid() and OnPerformComplete short-circuit cleanly into
-    // their no-op branches.
+    // Set the detach flag BEFORE RemoveAllTasks so every ~CurlCallbackAmx()
+    // fired during teardown atomically sees detached=true and takes the
+    // no-MF_* path. This also covers the previously-uncovered window where
+    // a shared_ptr<CurlCallbackAmx> could escape RemoveAllTasks via a late
+    // asio handler that captured one — its destructor would have observed
+    // detached=false in 1.3.9 and dereferenced g_fn_FindAmxScriptByAmx after
+    // KTPAMXX core was already unmapped.
+    //
+    // The drain loop above lets legitimate in-flight transfers complete with
+    // valid MF_* function pointers; only after the loop returns is it safe
+    // to switch into the no-op path. Skipping MF_UnregisterSPForward during
+    // teardown is correct — KTPAMXX is about to free its forward table.
     //
     // Fixes shutdown SIGSEGV at module offset 0x965d6 (CurlCallbackAmx
     // destructor's MF_FindScriptByAmx call). See
     // docs/INVESTIGATION_shutdown_race_2026-05-04.md.
     g_amxxcurl_detached.store(true, std::memory_order_release);
+
+    manager.RemoveAllTasks();
+
+    curl_global_cleanup();
 }

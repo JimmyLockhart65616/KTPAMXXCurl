@@ -2,6 +2,13 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.10-ktp] - 2026-05-05
+
+### Changed
+- **Flag-store ordering inverted in `OnAmxxDetach`** — `g_amxxcurl_detached.store(true)` now happens AFTER the in-flight transfer drain loop exits but BEFORE `manager.RemoveAllTasks()` and `curl_global_cleanup()`. The 1.3.9 order (flag stored at the very end) closed the confirmed crash path but left a theoretical window: if a `shared_ptr<CurlCallbackAmx>` escaped `RemoveAllTasks` via a late asio handler that captured one, the destructor would have observed `detached=false` and dereferenced `g_fn_FindAmxScriptByAmx` after KTPAMXX core was already unmapped — exactly the failure mode 1.3.9 was meant to prevent. The new order eliminates that window: every `~CurlCallbackAmx()` fired during or after teardown atomically sees `detached=true` and takes the safe `registered_callbacks_.clear()` path. Skipping `MF_UnregisterSPForward` during teardown is correct — KTPAMXX is about to free its forward table anyway. The drain loop runs first so legitimate in-flight completion callbacks still fire with valid MF_* function pointers; only after the loop returns does the no-op path activate. Defensive-only: no current code path triggers the previous failure mode (1.3.9 already covers the confirmed `0x965d6` crash signature). 5-line diff (one block move + comment refresh in `src/callbacks.cc`; declaration comment refresh in `src/amx_curl_callback_class.h`). See `docs/INVESTIGATION_shutdown_race_2026-05-04.md`.
+
+---
+
 ## [1.3.9-ktp] - 2026-05-05
 
 ### Fixed
