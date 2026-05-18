@@ -1,4 +1,5 @@
 #include "curl_multi_class.h"
+#include "sdk/amxxmodule.h"  // 1.3.11: MF_PrintSrvConsole for the C-callback boundary catch
 #include <functional>
 
 #ifdef AMXXCURL_DEBUG_LOG_ENABLE
@@ -12,7 +13,33 @@ const char* whatstr[] = { "none", "IN", "OUT", "INOUT", "REMOVE" };
 
 int CurlSocketCallbackStatic(CURL* easy, curl_socket_t s, int what, void* userp, void* socketp)
 {
-    return static_cast<CurlMulti*>(userp)->CurlSocketCallback(easy, s, what, socketp);
+    // 1.3.11 belt-and-suspenders (2026-05-13): C-callback boundary. libcurl
+    // calls this from its C code; if any exception escapes back into libcurl
+    // the runtime hits the unwinder at a foreign-frame boundary, finds no
+    // handler, and calls std::terminate(). Even with WrapTcpSocket's
+    // throwing-assign closed (1.3.11 primary fix), any future change inside
+    // CurlSocketCallback that adds an exception-throwing path would
+    // re-introduce the same crash class. Catching here costs ~zero on the
+    // happy path (the try block's setup is cheap relative to the function's
+    // map/emplace work) and converts any escaping exception into a -1 return
+    // value, which libcurl interprets as transfer abort rather than process
+    // crash.
+    //
+    // Thread-safety note (ktp-code-review 2026-05-13): MF_PrintSrvConsole
+    // is the AMXX game-thread console function. It's safe in the current
+    // single-threaded Poll() model where io_context callbacks run on the
+    // main game thread. If we ever move to a worker-thread io_context,
+    // these log calls become a data race and need to bounce through a
+    // thread-safe log queue.
+    try {
+        return static_cast<CurlMulti*>(userp)->CurlSocketCallback(easy, s, what, socketp);
+    } catch (const std::exception& ex) {
+        MF_PrintSrvConsole("[CURL] FATAL ERROR caught at C-callback boundary: %s\n", ex.what());
+        return -1;
+    } catch (...) {
+        MF_PrintSrvConsole("[CURL] FATAL ERROR caught at C-callback boundary: unknown exception\n");
+        return -1;
+    }
 }
 
 int CurlTimerCallbackStatic(CURLM* multi, long timeout_ms, void* userp)
@@ -160,7 +187,34 @@ int CurlMulti::CurlSocketCallback(CURL* easy, curl_socket_t s, int what, void* s
             {
                 socketData->is_ares_socket = true;
 
-                asio::ip::tcp::socket tcp_socket = asio_poller_.WrapTcpSocket(s, asio::ip::tcp::v4());
+                // 1.3.11 fix (2026-05-13): WrapTcpSocket no longer throws; on
+                // EBADF (libcurl handed us a stale fd from a closed socket)
+                // it returns a not-open socket and sets ec. Pre-fix this
+                // path raised std::system_error which propagated through
+                // CurlSocketCallbackStatic and tripped std::terminate() at
+                // the C-callback boundary — CHI1 SIGABRT 2026-05-13 00:26.
+                asio::error_code wrap_ec;
+                asio::ip::tcp::socket tcp_socket = asio_poller_.WrapTcpSocket(s, asio::ip::tcp::v4(), wrap_ec);
+                if (wrap_ec) {
+                    MF_PrintSrvConsole("[CURL] ERROR: WrapTcpSocket assign failed: fd=%d ec=%s\n",
+                                        s, wrap_ec.message().c_str());
+                    // Clean up the tentative SocketData; libcurl will reissue
+                    // an event for this fd if it's actually still valid, OR
+                    // skip it if it's gone. Returning 0 (success) lets the
+                    // multi handle continue processing other transfers.
+                    //
+                    // Mirror the CURL_POLL_REMOVE branch's cleanup (line 169)
+                    // by clearing libcurl's socketp pointer for this fd — we
+                    // never called curl_multi_assign with our SocketData* on
+                    // this failure path (the happy-path emplace happens
+                    // below at line ~210), so without this explicit clear
+                    // libcurl would retain whatever stale socketp it had
+                    // for s from any earlier eviction. ktp-code-review
+                    // 2026-05-13 caught this.
+                    curl_multi_assign(curl_multi_, s, nullptr);
+                    socket_data_map_.erase(s);
+                    return 0;
+                }
                 socket_map_.emplace(s, std::move(tcp_socket));
             }
 

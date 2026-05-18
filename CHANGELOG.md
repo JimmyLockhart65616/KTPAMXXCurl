@@ -2,6 +2,15 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.11-ktp] - 2026-05-13
+
+### Fixed
+- **SIGABRT in `WrapTcpSocket` from throw across C-callback boundary** — CHI1 27015 crashed at 2026-05-13 00:26 ET with a `std::system_error("assign: Bad file descriptor")` propagating out of `AsioPoller::WrapTcpSocket` through `CurlSocketCallbackStatic`, hitting the C-callback boundary from libcurl with no handler, and tripping `std::terminate()`. Distinct failure class from the 1.3.9 / 1.3.10 shutdown race (`~CurlCallbackAmx()` at module-detach time) — this one is mid-operation during normal traffic when libcurl's multi-handle dispatch hands us a stale fd that a sibling event closed between socket-callback issuance and our dispatch. The prior `WrapTcpSocket` used the throwing `basic_socket(io_context, protocol, native_socket)` constructor, which calls `asio::detail::throw_error(ec, "assign")` (`basic_socket.hpp:164`) on EBADF. Fix: `WrapTcpSocket` now takes an `asio::error_code& ec` out-param and uses the non-throwing `socket.assign(protocol, native_socket, ec)` overload (`basic_socket.hpp:389`); on EBADF the returned socket is default-constructed (not open) and `ec` is populated. Caller in `CurlMulti::CurlSocketCallback` handles the failure by calling `curl_multi_assign(curl_multi_, s, nullptr)` to clear libcurl's stale `socketp` for this fd, erasing our `socket_data_map_` entry, and returning 0 so libcurl can continue dispatching other transfers. Belt-and-suspenders try/catch at the `CurlSocketCallbackStatic` boundary returns `-1` on any future escaping exception (libcurl interprets as transfer abort, not process crash). ktp-code-review round 1 caught the missing `curl_multi_assign` clear (without it libcurl retained the stale socketp pointer across our recovery); round 2 caught the thread-safety note about `MF_PrintSrvConsole` (safe in current single-threaded `Poll()` model; would need a thread-safe log queue if io_context ever moves to worker threads). See memory `amxxcurl_asio_throw_assign.md` for the full investigation. 
+  
+  **Deployment timeline:** binary md5 `b1932ed0c74efe6eff1cf1c68b6ddd0a` SCP'd as `.so.new` to all 24/24 active fleet instances + tier2 runner 2026-05-13; auto-swapped 2026-05-14 03:00 EDT via the established `ktp-scheduled-restart.sh` glob; soak window 2026-05-14 → 2026-05-21.
+
+---
+
 ## [1.3.10-ktp] - 2026-05-05
 
 ### Changed
