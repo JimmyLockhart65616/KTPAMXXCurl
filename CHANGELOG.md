@@ -2,6 +2,13 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.12-ktp] - 2026-07-03
+
+### Fixed
+- **Shutdown SIGSEGV in `~CurlCallbackAmx()` when `OnAmxxDetach` never runs** — the CHI1 27015 recurring shutdown segfault (May 13/18, Jun 7 03:00, Jun 23 09:07 cores) survived the 1.3.10/1.3.11 guard because the guard never armed: `g_amxxcurl_detached` read `0x00` in both analyzed cores, proving the engine unloaded KTPAMXX core **without ever calling `OnAmxxDetach`** on that shutdown path. The `AmxCurlController` singleton's exit-time destructor cascade (manager → tasks → `~CurlCallbackAmx`) then reached `IsAmxValid()` → `MF_FindScriptByAmx` through a stale `g_fn` pointer into unmapped core — both cores fault at identical relative offsets (`amxxcurl+0x96a0c` in the destructor, EIP at `base+0x673070` in the ex-KTPAMXX region, with engine/ktpamx/dod already absent from the core's mapping list while amxxcurl was still resident). Fix: `AmxCurlController::Instance()` now registers an `atexit` handler **immediately after** the singleton is constructed that sets `g_amxxcurl_detached = true`. Because `atexit` and static destructors share one LIFO list, the handler is guaranteed to run before the singleton's destructor — so the exit-time cascade always sees `detached=true` and takes the safe no-`MF_*` path, whether or not `OnAmxxDetach` ever ran. A normal detach still sets the flag earlier (drain loop → flag → `RemoveAllTasks`), making the atexit store a no-op; skipping `MF_UnregisterSPForward` at exit is correct since the forward table owner is already gone. No behavior change at gameplay time; single-header diff (`src/amx_curl_controller_class.h`). Root-cause analysis in memory `chi1-shutdown-segfault-amxxcurl-detach-skipped`; the separate question of WHY that shutdown path skips module detach remains open on the KTPAMXX side.
+
+---
+
 ## [1.3.11-ktp] - 2026-05-13
 
 ### Fixed
