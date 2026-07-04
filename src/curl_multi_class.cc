@@ -1,5 +1,6 @@
 #include "curl_multi_class.h"
 #include "sdk/amxxmodule.h"  // 1.3.11: MF_PrintSrvConsole for the C-callback boundary catch
+#include "amx_curl_callback_class.h"  // g_amxxcurl_detached — MF_* is stale once set
 #include <functional>
 
 #ifdef AMXXCURL_DEBUG_LOG_ENABLE
@@ -34,10 +35,12 @@ int CurlSocketCallbackStatic(CURL* easy, curl_socket_t s, int what, void* userp,
     try {
         return static_cast<CurlMulti*>(userp)->CurlSocketCallback(easy, s, what, socketp);
     } catch (const std::exception& ex) {
-        MF_PrintSrvConsole("[CURL] FATAL ERROR caught at C-callback boundary: %s\n", ex.what());
+        if (!g_amxxcurl_detached.load(std::memory_order_acquire))
+            MF_PrintSrvConsole("[CURL] FATAL ERROR caught at C-callback boundary: %s\n", ex.what());
         return -1;
     } catch (...) {
-        MF_PrintSrvConsole("[CURL] FATAL ERROR caught at C-callback boundary: unknown exception\n");
+        if (!g_amxxcurl_detached.load(std::memory_order_acquire))
+            MF_PrintSrvConsole("[CURL] FATAL ERROR caught at C-callback boundary: unknown exception\n");
         return -1;
     }
 }
@@ -196,8 +199,9 @@ int CurlMulti::CurlSocketCallback(CURL* easy, curl_socket_t s, int what, void* s
                 asio::error_code wrap_ec;
                 asio::ip::tcp::socket tcp_socket = asio_poller_.WrapTcpSocket(s, asio::ip::tcp::v4(), wrap_ec);
                 if (wrap_ec) {
-                    MF_PrintSrvConsole("[CURL] ERROR: WrapTcpSocket assign failed: fd=%d ec=%s\n",
-                                        s, wrap_ec.message().c_str());
+                    if (!g_amxxcurl_detached.load(std::memory_order_acquire))
+                        MF_PrintSrvConsole("[CURL] ERROR: WrapTcpSocket assign failed: fd=%d ec=%s\n",
+                                           s, wrap_ec.message().c_str());
                     // Clean up the tentative SocketData; libcurl will reissue
                     // an event for this fd if it's actually still valid, OR
                     // skip it if it's gone. Returning 0 (success) lets the

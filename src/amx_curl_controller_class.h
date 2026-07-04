@@ -23,14 +23,23 @@ public:
         static AmxCurlController instance;
         // Registered AFTER instance's destructor, so it runs BEFORE it
         // (atexit entries and static dtors share one LIFO list, at both
-        // process exit and dlclose of this module). The engine can unload
-        // KTPAMXX without ever calling OnAmxxDetach; the teardown cascade
-        // (manager -> tasks -> ~CurlCallbackAmx) would then reach MF_*
-        // through pointers into unmapped core. A normal detach sets the
-        // flag earlier and this store becomes a no-op.
+        // process exit and dlclose of this module). Extension-mode engine
+        // shutdown never calls OnAmxxDetach (ReleaseEntityDlls dlcloses
+        // ktpamx with no module-detach pass), so this handler IS the real
+        // teardown: arm the flag so the destructor cascade (manager ->
+        // tasks -> ~CurlCallbackAmx) never reaches MF_* through pointers
+        // into unmapped core, then detach in-flight easies from the multi
+        // while libcurl/asio are still alive — curl_easy_cleanup on a
+        // still-attached handle is UB per libcurl docs. When a normal
+        // detach DID run, the flag is already set and we must not touch
+        // curl again (curl_global_cleanup already happened) — hence the
+        // exchange gate.
         static const bool detach_guard = [] {
             int rc = __cxa_atexit(
-                [](void*) { g_amxxcurl_detached.store(true, std::memory_order_release); },
+                [](void*) {
+                    if (!g_amxxcurl_detached.exchange(true, std::memory_order_acq_rel))
+                        Instance().get_curl_manager().RemoveAllTasks();
+                },
                 nullptr, &__dso_handle);
             if (rc != 0)
                 MF_PrintSrvConsole("[CURL] WARNING: detach-guard atexit registration failed (%d)\n", rc);
@@ -48,8 +57,12 @@ private:
     AmxCurlController(const AmxCurlController& root);
     AmxCurlController& operator=(const AmxCurlController&);
 
-    AmxCurlManager curl_manager_;
+    // asio_poller_ FIRST: members destruct in reverse declaration order, and
+    // ~CurlMulti (inside the manager) still owns asio sockets bound to the
+    // poller's io_context — the poller must outlive it. Also makes the ctor's
+    // curl_manager_(asio_poller_) reference a fully-constructed object.
     AsioPoller asio_poller_;
+    AmxCurlManager curl_manager_;
 };
 
 #endif // _AMX_CURL_CONTROLLER_H_

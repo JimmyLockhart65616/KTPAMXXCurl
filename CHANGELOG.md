@@ -2,6 +2,14 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.13-ktp] - 2026-07-03
+
+### Fixed
+- **libcurl teardown-ordering UB on the skipped-detach exit path** — follow-up to 1.3.12 after the root-cause investigation landed the key fact: **extension-mode engine shutdown NEVER calls `OnAmxxDetach`** (`ReleaseEntityDlls` calls only the single `pfnGameShutdown` slot — which KTPAMXX doesn't register — then dlcloses ktpamx with no module-detach pass; `Meta_Detach` is Metamod-only). So on every fleet shutdown the whole `OnAmxxDetach` body (drain loop, `RemoveAllTasks`, `curl_global_cleanup`) is dead code, and the 1.3.12 atexit guard is the *real* teardown path — but 1.3.12 only armed the flag, leaving `~Curl` to run `curl_easy_cleanup` on easies still attached to the multi (UB per libcurl docs; `~AsioPoller` also destructs before `~AmxCurlManager`, reverse member order). The guard handler now does the teardown properly: `g_amxxcurl_detached.exchange(true)`, and if the flag was previously clear (detach never ran), calls `RemoveAllTasks()` — detaching in-flight easies from the multi while libcurl and asio are fully alive — before the destructor cascade runs. When a real detach did run, the exchange gate makes the handler a no-op (must not touch curl after `curl_global_cleanup`). Belt-and-suspenders: the three `MF_PrintSrvConsole` sites reachable from multi callbacks (two C-callback-boundary catches + the WrapTcpSocket EBADF recovery, `curl_multi_class.cc`) are now gated on `g_amxxcurl_detached` so a pathological callback during exit-time removal can't print through a stale MF pointer. Root-cause detail in memory `chi1-shutdown-segfault-amxxcurl-detach-skipped`; the engine/KTPAMXX-side fix (per-extension shutdown export so detach actually runs) is tracked separately in TODO.md.
+- **Controller member order: `asio_poller_` now declared before `curl_manager_`** (ktp-code-review finding, same teardown pass) — destruction runs in reverse declaration order, and `~CurlMulti` (inside the manager) owns `asio::ip::tcp::socket` objects bound to the poller's `io_context`; the old order destroyed the poller first, leaving any socket libcurl's connection cache still held (outside the in-progress set `RemoveAllTasks` drains) to destruct against a dead `io_context`. Pre-existing latent condition, usually masked by the eager close-on-`CURL_POLL_REMOVE` behavior; the swap also makes the constructor's `curl_manager_(asio_poller_)` reference a fully-constructed member.
+
+---
+
 ## [1.3.12-ktp] - 2026-07-03
 
 ### Fixed
