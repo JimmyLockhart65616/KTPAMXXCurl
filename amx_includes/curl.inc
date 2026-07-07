@@ -61,7 +61,7 @@ native curl_easy_escape(const CURL:handle, const url[], buffer[], const maxlen);
  * @param buffer            Buffer to copy decoded url
  * @param maxlen            Maximum size of the buffer
  *
- * @noreturn
+ * @return                  Length of the decoded string
  * @error                   If passed curl handle is not a valid
  */
 native curl_easy_unescape(const CURL: handle, const url[], buffer[], const maxlen);
@@ -77,12 +77,14 @@ native curl_easy_unescape(const CURL: handle, const url[], buffer[], const maxle
 native CURL: curl_easy_init();
 
 /**
- * Invoke this function after curl_easy_init and all the curl_easy_setopt calls are made, and will perform the transfer as described in the options.
+ * Invoke this function after curl_easy_init and all the curl_easy_setopt calls are made.
  * It must be called with the same curl handle as input as the curl_easy_init call returned.
- * You can do any amount of calls to curl_easy_perform while using the same curl handle. If you intend to transfer more than one file, you are even 
- * encouraged to do so. libcurl will then attempt to re-use the same connection for the following transfers, thus making the operations faster, 
- * less CPU intense and using less network resources. Just note that you will have to use curl_easy_setopt between the invokes to set options 
- * for the following curl_easy_perform.
+ * Unlike stock libcurl, in this module perform ENQUEUES the transfer and returns
+ * immediately — it never blocks the server. The completion callback fires later
+ * with the result. Do NOT reuse a handle that is still in flight; wait for its
+ * callback. Handles can be reused across sequential transfers (connection reuse
+ * still applies) — use curl_easy_setopt between invokes to change options for
+ * the following curl_easy_perform.
  * see also https://curl.haxx.se/libcurl/c/curl_easy_perform.html
  *
  * @param handle            Curl handle
@@ -141,9 +143,10 @@ native curl_easy_cleanup(const CURL: handle);
 native curl_easy_reset(const CURL: handle);
 
 /**
- * Request internal information from the curl session with this function. The third argument MUST be a buffer for value (num, string, float) 
- * The data pointed-to will be filled in accordingly and can be relied upon only if the function returns CURLE_OK. Use this function AFTER 
- * a performed transfer if you want to get transfer related data.
+ * Request internal information from the curl session with this function. The third argument MUST be a buffer for value (num, string, float)
+ * The data pointed-to will be filled in accordingly and can be relied upon only if the function returns CURLE_OK.
+ * Transfers are asynchronous in this module: the values are only meaningful
+ * inside the completion callback (transfer finished), not before.
  * see also https://curl.haxx.se/libcurl/c/curl_easy_getinfo.html
  *
  * @param handle            Curl handle
@@ -222,6 +225,10 @@ native curl_version(buffer[], const maxlen);
  * @param handle    Curl handle
  * @param buffer    Buffer to copy response body into
  * @param maxlen    Maximum buffer size
+ *
+ * @note            The captured body is capped at 64KB — anything beyond is
+ *                  truncated (no error to the caller; the module logs a
+ *                  warning to the server console on first truncation).
  *
  * @return          Number of bytes copied
  * @error           If passed curl handle is not valid

@@ -42,16 +42,10 @@ This project contains example Python/Paramiko scripts for SSH operations. Use th
 - `scripts/claim_netdata.py` / `unclaim_netdata.py` - Netdata Cloud management
 - `scripts/check_hlstatsx.py` - Check HLStatsX daemon status
 
-**Server Credentials:**
-| Server | Host | User | Password |
-|--------|------|------|----------|
-| Atlanta | 74.91.121.9 | dodserver | ktp |
-| Dallas | 74.91.126.55 | dodserver | ktp |
-| Denver | 66.163.114.109 | dodserver | ktp |
-| New York | 74.91.123.64 | dodserver | ktp |
-| Data | 74.91.112.242 | root | (SSH key) |
-
-See `N:\Nein_\KTP Git Projects\CLAUDE.md` for full paramiko SSH documentation.
+**Server Credentials:** never in this repo (it is PUBLIC). The old table here
+listed the pre-2026-05-31 rotated values. Current credentials and the full
+paramiko SSH documentation live in the private root context:
+`N:\Nein_\KTP Git Projects\CLAUDE.md` § Server Credentials.
 
 ## Related Projects
 - `N:\Nein_\KTP Git Projects\KTPAMXX` - AMX Mod X fork (provides module API)
