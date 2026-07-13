@@ -13,11 +13,14 @@ class AmxCurl
     using AmxCallback = int;
 
 public:
+    // Init lists follow declaration order (members initialize in that order
+    // regardless of what the list says — mismatching it just invites -Wreorder
+    // and, the day an initializer reads another member, a real bug).
     AmxCurl(AMX* amx, CurlMulti& curl_multi) :
         amx_(amx),
+        curl_multi_(curl_multi),
         curl_callback_(std::make_shared<CurlCallbackAmx>(amx)),
         curl_(curl_callback_),
-        curl_multi_(curl_multi),
         amx_callback_fun_(0),
         task_handle_(0),
         amx_callback_data_(nullptr),
@@ -28,16 +31,30 @@ public:
 
     AmxCurl(AmxCurl&& other) :
         amx_(other.amx_),
+        curl_multi_(other.curl_multi_),
         curl_callback_(other.curl_callback_),
         curl_(std::move(other.curl_)),
         amx_callback_fun_(other.amx_callback_fun_),
         task_handle_(other.task_handle_),
         amx_callback_data_(other.amx_callback_data_),
         amx_callback_data_len_(other.amx_callback_data_len_),
-        curl_multi_(other.curl_multi_),
         is_transfer_in_progress_(other.is_transfer_in_progress_),
         cleanup_deferred_(other.cleanup_deferred_)
-    { }
+    {
+        // We now own the buffer — the moved-from object must not free it too.
+        other.amx_callback_data_ = nullptr;
+        other.amx_callback_data_len_ = 0;
+    }
+
+    // amx_callback_data_ is a new[]-allocated cell array handed over by
+    // curl_perform. OnPerformComplete frees it on the normal path, but a task
+    // destroyed while still in flight (RemoveAllTasks at shutdown/detach) never
+    // reaches that path and leaked the buffer. Exit-only today, but the manager
+    // is free to drop tasks at any time, so own it properly.
+    ~AmxCurl()
+    {
+        delete[] amx_callback_data_;
+    }
 
     void Perform(const char* complete_callback, int task_handle, cell* data, int data_len)
     {
@@ -46,6 +63,8 @@ public:
             throw CurlTaskCallbackNotFoundException();
         }
 
+        // A re-Perform before the previous completion would strand the old buffer.
+        delete[] amx_callback_data_;
         amx_callback_data_ = data;
         amx_callback_data_len_ = data_len;
         task_handle_ = task_handle;
@@ -69,8 +88,13 @@ private:
 
         is_transfer_in_progress_ = false;
 
+        // Take ownership out of the member: everything below deletes cb_data on
+        // every path, so the member must not also free it in ~AmxCurl.
         cell* cb_data = amx_callback_data_;
         int cb_data_len = amx_callback_data_len_;
+        amx_callback_data_ = nullptr;
+        amx_callback_data_len_ = 0;
+
         int cb_id = amx_callback_fun_;
         int task_handle = task_handle_;
 

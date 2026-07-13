@@ -1,5 +1,7 @@
 #include "sdk/amxxmodule.h"
 
+#include <cstdint>
+
 #include "curl_class.h"
 #include "amx_curl_manager_class.h"
 #include "amx_curl_controller_class.h"
@@ -132,13 +134,19 @@ static cell AMX_NATIVE_CALL amx_curl_easy_setopt(AMX* amx, cell* params)
             return CURLE_OK;
         }
 
-        // CURLOPTTYPE_OFF_T
-        curl_off_t val = 0;
+        // CURLOPTTYPE_OFF_T — Pawn passes the 64-bit value as two cells
+        // {high, low} (see curl_off_t in curl.inc).
+        //
+        // Assemble through uint64_t. `cell` is a SIGNED 32-bit int, so the old
+        // `val |= p[1]` sign-extended the low word: any low word with bit 31 set
+        // (>= 0x80000000) became 0xFFFFFFFF_xxxxxxxx and smeared ones across the
+        // high word, silently corrupting the value. Shifting the signed high word
+        // left by 32 was UB on top of that.
         cell* p = MF_GetAmxAddr(amx, params[3]);
 
-        val = p[0];
-        val <<= 32;
-        val |= p[1];
+        uint64_t hi = static_cast<uint32_t>(p[0]);
+        uint64_t lo = static_cast<uint32_t>(p[1]);
+        curl_off_t val = static_cast<curl_off_t>((hi << 32) | lo);
 
         return manager.CurlSetOption(curl_handle, option, val);
     }

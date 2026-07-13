@@ -127,6 +127,27 @@ curl_socket_t CurlMulti::CurlOpenSocketCallback(curlsocktype purpose, curl_socka
 
         sockfd = tcp_socket.native_handle();
 
+        // The kernel just handed us this fd number, so any entry still sitting
+        // under it is provably stale — libcurl closed that connection without
+        // its close callback reaching us. Since we now keep idle keep-alive
+        // sockets in the map, a silent emplace collision would be lethal: the
+        // emplace no-ops, the moved-from temp's dtor closes the BRAND-NEW fd,
+        // and we hand libcurl a closed socket while the map keeps a stale entry
+        // that later closes whatever that number becomes. release() the corpse
+        // (never close — the fd is live and ours now) and take the slot.
+        auto stale = socket_map_.find(sockfd);
+        if (stale != socket_map_.end())
+        {
+            stale->second.release();
+            socket_map_.erase(stale);
+            // Evict the matching SocketData too, or its stale previous_action
+            // would carry into the new connection's SetSock and mis-arm the
+            // waits (a stalled transfer rather than a crash, but still wrong).
+            socket_data_map_.erase(sockfd);
+            if (!g_amxxcurl_detached.load(std::memory_order_acquire))
+                MF_PrintSrvConsole("[CURL] WARNING: stale socket_map_ entry for fd %d on open — close callback was missed\n", sockfd);
+        }
+
         socket_map_.emplace(sockfd, std::move(tcp_socket));
     }
     else
@@ -164,14 +185,32 @@ int CurlMulti::CurlSocketCallback(CURL* easy, curl_socket_t s, int what, void* s
     {
         if (socketData)
         {
-            if (socket_map_.find(s) != socket_map_.end())
+            auto it = socket_map_.find(s);
+            if (it != socket_map_.end())
             {
                 if (socketData->is_ares_socket)
                 {
-                    socket_map_.at(s).release();
+                    // c-ares owns this fd — detach it from asio (release() does
+                    // not close) and drop it. libcurl never issues a close
+                    // callback for ares sockets.
+                    it->second.release();
+                    socket_map_.erase(it);
                 }
-                // Fix: Always erase from socket_map_, not just for ARES sockets
-                socket_map_.erase(s);
+                else
+                {
+                    // CURL_POLL_REMOVE means "stop watching this fd", NOT "this
+                    // fd is dead" — libcurl keeps the connection in its cache
+                    // for keep-alive reuse. Destroying the asio socket here
+                    // closes the fd underneath libcurl, and when it reuses the
+                    // connection we get a socket callback for an fd we no longer
+                    // own: not in socket_map_ -> misclassified as an ares socket
+                    // -> WrapTcpSocket on a closed fd -> EBADF. That is the 1.3.11
+                    // EBADF class. Cancel the pending waits and leave the socket
+                    // open; CurlCloseSocketCallback is libcurl telling us it is
+                    // really done with the fd, and that is the only place we close.
+                    asio::error_code cancel_ec;
+                    it->second.cancel(cancel_ec);
+                }
             }
 
             removed_sockets_.emplace(s);
@@ -271,8 +310,33 @@ int CurlMulti::CurlTimerCallback(CURLM* multi, long timeout_ms)
 // calls by asio when data r/w is ready
 void CurlMulti::AsioSocketActionCallback(int action, curl_socket_t s, SocketDataPtr socket_data, const asio::error_code& error)
 {
+    // Destroyed while a wait was pending (shutdown) — the bound `this` is gone.
+    if (curl_multi_ == nullptr)
+    {
+        return;
+    }
+
+    // We cancel() pending waits at CURL_POLL_REMOVE. The abort is expected and
+    // must NOT be reported to libcurl: falling through would hit the `if (error)`
+    // branch below and hand curl a CURL_CSELECT_ERR for a socket it just told us
+    // to stop watching (and may still be holding for keep-alive reuse).
+    if (error == asio::error::operation_aborted)
+    {
+        return;
+    }
+
     // shared_ptr ensures socket_data is valid even if removed from map
     if (socket_map_.count(s) == 0 || !socket_data)
+    {
+        return;
+    }
+
+    // Staleness check: this handler was bound to ONE SocketData. If the fd has
+    // since been removed and re-added (keep-alive reuse mints a fresh SocketData
+    // for the same fd), the current entry is a different object and this handler
+    // is a ghost from the previous generation — drop it.
+    auto sd_it = socket_data_map_.find(s);
+    if (sd_it == socket_data_map_.end() || sd_it->second != socket_data)
     {
         return;
     }
@@ -285,7 +349,7 @@ void CurlMulti::AsioSocketActionCallback(int action, curl_socket_t s, SocketData
             action = CURL_CSELECT_ERR;
 
         removed_sockets_.clear();
-        CURLMcode rc = curl_multi_socket_action(curl_multi_, s, action, &running_handles_);
+        curl_multi_socket_action(curl_multi_, s, action, &running_handles_);
 
         CheckMultiInfo();
 
@@ -350,8 +414,16 @@ void CurlMulti::CheckMultiInfo()
             easy = msg->easy_handle;
             res = msg->data.result;
 
-            if (curl_map_.count(easy))
-                curl_map_[easy](res);
+            // Copy the callback out before invoking it. It runs
+            // AmxCurl::OnPerformComplete, which calls RemoveCurl -> curl_map_.erase(easy),
+            // destroying the very std::function we would otherwise be executing
+            // through. Invoking a callable that frees itself mid-call is UB.
+            auto it = curl_map_.find(easy);
+            if (it != curl_map_.end())
+            {
+                CurlPerformComplete callback = it->second;
+                callback(res);
+            }
         }
     }
 
@@ -360,6 +432,9 @@ void CurlMulti::CheckMultiInfo()
 
 void CurlMulti::SetSock(int act, curl_socket_t s, SocketDataPtr socket_data)
 {
+    if (!socket_data || curl_multi_ == nullptr)
+        return;
+
     auto it = socket_map_.find(s);
     if (it == socket_map_.end())
     {

@@ -108,6 +108,20 @@ public:
     {
         CheckHandle(handle);
 
+        // Re-performing an in-flight handle is not supported and silently
+        // destroys the first transfer: curl_multi_add_handle returns
+        // CURLM_ADDED_ALREADY, and AddCurl's error path then erases the live
+        // completion callback — so the running transfer finishes with nobody to
+        // call, is_transfer_in_progress_ stays true forever, and the handle
+        // becomes a zombie RemoveTask defers on and the sweeper never collects.
+        // Refuse it, like CurlReset does.
+        if (amx_curl_.at(handle).get_is_transfer_in_progress())
+        {
+            MF_PrintSrvConsole("[CURL] WARNING: curl_easy_perform called on handle %d while a transfer is already in progress — ignoring\n", handle);
+            delete[] data;  // we own it; the caller hands ownership over on every call
+            return;
+        }
+
         amx_curl_.at(handle).Perform(complete_callback, handle, data, data_len);
     }
 
@@ -122,6 +136,17 @@ public:
     void CurlReset(AmxCurlHandle handle)
     {
         CheckHandle(handle);
+
+        // curl_easy_reset on a handle still attached to the multi is undefined
+        // behavior per libcurl — it rips out the options (including our socket
+        // callbacks) while the transfer is mid-flight. Same hazard RemoveTask
+        // already guards, so refuse it the same way rather than corrupting the
+        // transfer.
+        if (amx_curl_.at(handle).get_is_transfer_in_progress())
+        {
+            MF_PrintSrvConsole("[CURL] WARNING: curl_easy_reset called on handle %d while transfer is in progress — ignoring\n", handle);
+            return;
+        }
 
         amx_curl_.at(handle).get_curl_callback_amx().ResetAmxCallbacks();
         amx_curl_.at(handle).get_curl().Reset();
