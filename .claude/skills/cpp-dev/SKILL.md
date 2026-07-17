@@ -108,6 +108,27 @@ invariant documented in `amx_curl_controller_class.h`: `curl_multi_cleanup`
 must run (or the multi must be torn down) **before** `curl_global_cleanup()` —
 never call libcurl API after global cleanup has run.
 
+## Never run a destructive simulation inside the working tree
+Verifying a fix often means simulating the failure — writing a fake `build.sh`, a
+fake artifact, a fake staging dir. Do it in a **verified** scratch dir, never in
+the repo:
+
+```bash
+T="$(mktemp -d)" || exit 1
+[ -n "$T" ] && [ -d "$T" ] || exit 1   # verify BEFORE you cd — this is the whole rule
+cd "$T" || exit 1
+```
+
+`cd "$T"` with an empty `$T` **silently succeeds and leaves you where you were** —
+in the repo. A simulation that then writes `build.sh` overwrites the real one. On
+2026-07-16 exactly that truncated a tracked 60-line upstream file to 2 lines and
+dropped a junk `.so` into `build/`, where a `find | head -1` could have staged it.
+It was caught only because `git status` showed a modification nobody made.
+
+So: verify the scratch dir before `cd`, and **run `git status` after any test that
+touches the filesystem** — an unexpected change is the tell. Prefer copying inputs
+out to the scratch dir over running tools "in place".
+
 ## Workflow
 1. **Build**: `wsl bash -c "cd '/mnt/n/Nein_/KTP Git Projects/KTPAmxxCurl' && bash build_linux.sh"`
    (CMake → `build/amxxcurl_ktp_i386.so`, auto-stages to the KTP DoD Server
