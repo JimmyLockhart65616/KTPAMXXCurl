@@ -1,5 +1,7 @@
 # KTPAmxxCurl - Claude Code Context
 
+**REQUIRED: Before modifying any C++ source in this repo, invoke the `cpp-dev` skill** (`.claude/skills/cpp-dev/SKILL.md`). It carries the exception-boundary rules, socket-lifecycle ownership, the handle-reuse contract, and the build/verify workflow; do not edit source without it loaded.
+
 ## Build Command
 To build this project, use:
 ```bash
