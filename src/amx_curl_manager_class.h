@@ -38,6 +38,9 @@ public:
         curl_multi_(asio_poller)
     { }
 
+    // For OnAmxxDetach: tear the CURLM* down BEFORE curl_global_cleanup().
+    CurlMulti& get_curl_multi() { return curl_multi_; }
+
     AmxCurlHandle CreateCurl(AMX* amx)
     {
         AmxCurlHandle handle = GetCurlHandle();

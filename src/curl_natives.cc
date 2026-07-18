@@ -158,6 +158,23 @@ static cell AMX_NATIVE_CALL amx_curl_easy_setopt(AMX* amx, cell* params)
     {
         MF_LogError(amx, AMX_ERR_NATIVE, "Invalid curl handle");
     }
+    catch (const std::exception& ex)
+    {
+        // An exported-but-unsupported FUNCTIONPOINT option (e.g. XFERINFOFUNCTION)
+        // makes SetupAmxCallback / GetMethodPointerForCallbackOption throw
+        // std::runtime_error from their default case. Without this catch it escapes
+        // the native boundary into -fno-exceptions KTPAMXX core = std::terminate
+        // (the 1.3.11 CHI1 SIGABRT class, at the native boundary instead of the
+        // C-callback one). Must stay AFTER the typed catches above.
+        MF_LogError(amx, AMX_ERR_NATIVE, "%s. Option: %d", ex.what(), params[2]);
+    }
+    catch (...)
+    {
+        // Final net, matching the C-callback boundary's catch(...): a
+        // privately-derived-from-std::exception type (this codebase has some) or
+        // a non-std::exception throw must not escape into -fno-exceptions core.
+        MF_LogError(amx, AMX_ERR_NATIVE, "Unknown exception. Option: %d", params[2]);
+    }
 
     return -1;
 }

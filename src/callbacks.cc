@@ -91,5 +91,13 @@ void OnAmxxDetach()
 
     manager.RemoveAllTasks();
 
+    // Tear the CURLM* down BEFORE curl_global_cleanup(): libcurl requires all
+    // multi handles cleaned up first. The frame callback is already unregistered
+    // and the drain loop has finished, so nothing touches the multi after this.
+    // Otherwise the ~CurlMulti destructor cascade (during dlclose) runs
+    // curl_multi_cleanup after global teardown — UB (benign only on the currently
+    // vendored curl/OpenSSL, one bump from the CHI1 shutdown-crash class).
+    manager.get_curl_multi().Shutdown();
+
     curl_global_cleanup();
 }

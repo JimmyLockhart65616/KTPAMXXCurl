@@ -73,17 +73,28 @@ CurlMulti::CurlMulti(AsioPoller& asio_poller) :
     curl_multi_setopt(curl_multi_, CURLMOPT_TIMERDATA, this);
 }
 
-CurlMulti::~CurlMulti()
+void CurlMulti::Shutdown()
 {
-    curl_multi_cleanup(curl_multi_);
-    // Null out so any asio handler that captured `this` and runs after
-    // destruction (e.g. a lambda posted from CurlTimerCallback, or a pending
-    // async_wait on the asio timer) can early-return instead of dereferencing
-    // a freed CURLM*. See CurlTimerCallback and AsioTimerCallback for guards.
-    curl_multi_ = nullptr;
+    // Idempotent: OnAmxxDetach calls this to free the multi BEFORE
+    // curl_global_cleanup(), then ~CurlMulti calls it again in the dlclose
+    // destructor cascade. curl_multi_ == nullptr is the already-done guard.
+    if (curl_multi_)
+    {
+        curl_multi_cleanup(curl_multi_);
+        // Null out so any asio handler that captured `this` and runs after
+        // teardown (e.g. a lambda posted from CurlTimerCallback, or a pending
+        // async_wait on the asio timer) can early-return instead of dereferencing
+        // a freed CURLM*. See CurlTimerCallback and AsioTimerCallback for guards.
+        curl_multi_ = nullptr;
+    }
 }
 
-void CurlMulti::AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback)
+CurlMulti::~CurlMulti()
+{
+    Shutdown();
+}
+
+CURLMcode CurlMulti::AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback)
 {
     // KTP: Set options before inserting into map — if SetOption throws,
     // we don't leave an orphaned handle in curl_map_
@@ -97,9 +108,13 @@ void CurlMulti::AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback)
     CURLMcode code = curl_multi_add_handle(curl_multi_, curl.get_handle());
     if (code != CURLM_OK)
     {
-        DEBUG_LOG("Curl | ERROR: curl_multi_add_handle failed: %s\n", curl_multi_strerror(code));
+        // Release-visible (was DEBUG_LOG, stripped in release → silent zombie).
+        // The completion callback just erased below can never fire, so the caller
+        // MUST undo its in-progress state on this non-OK return.
+        MF_PrintSrvConsole("[CURL] ERROR: curl_multi_add_handle failed: %s\n", curl_multi_strerror(code));
         curl_map_.erase(curl.get_handle());
     }
+    return code;
 }
 
 void CurlMulti::RemoveCurl(Curl& curl)

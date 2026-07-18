@@ -23,7 +23,15 @@ public:
     CurlMulti(AsioPoller& asio_poller);
     ~CurlMulti();
 
-    void AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback);
+    // Explicit teardown of the CURLM* so OnAmxxDetach can free the multi BEFORE
+    // curl_global_cleanup() (libcurl requires all multi handles cleaned up first;
+    // the destructor cascade otherwise runs curl_multi_cleanup after global
+    // teardown = UB). Idempotent; ~CurlMulti also calls it.
+    void Shutdown();
+
+    // Returns the curl_multi_add_handle result so the caller can undo its
+    // in-progress state on failure instead of leaking a permanent zombie handle.
+    CURLMcode AddCurl(Curl& curl, CurlMulti::CurlPerformComplete&& callback);
     void RemoveCurl(Curl& curl);
 
     curl_socket_t CurlOpenSocketCallback(curlsocktype purpose, struct curl_sockaddr *address);

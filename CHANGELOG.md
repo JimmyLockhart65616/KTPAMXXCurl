@@ -2,6 +2,19 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.15-ktp] - 2026-07-18
+
+Crash-safety + resource-leak hardening from the 2026-07-15 stack review (CU-01/03/05/07, all P2/CONFIRMED). Binary md5 `fd6160057bf5d997d7d20b6fa7f8c1df`. Module-internal only — no plugin recompile (no `.inc` / native-signature change).
+
+### Fixed
+- **CU-03 — the outermost game-thread boundary (`AsioPoller::Poll`) was unguarded.** `io_context::poll()` rethrows anything an asio handler let escape (`bad_alloc`, a throwing `timer.cancel()`, an uncaught `std::runtime_error` from a completion callback), so it could unwind through `CurlFrameCallback` / the `OnAmxxDetach` drain loop into ReHLDS's `-fno-exceptions` frame loop and `std::terminate` the server mid-match. Now wrapped in the same `std::exception`/`...` catch (gated on `g_amxxcurl_detached`) the module already uses at the C-callback boundary; `io_context` stays valid after a handler throws so the `stopped()`/`restart()` check still runs. Covers both the frame-callback and shutdown-drain Poll paths.
+- **CU-07 — an unsupported `FUNCTIONPOINT` curl option crashed the server at the native boundary.** `curl_easy_setopt(h, CURLOPT_XFERINFOFUNCTION, ...)` (and the other exported-but-unsupported callback options) makes `SetupAmxCallback` / `GetMethodPointerForCallbackOption`'s default case throw `std::runtime_error`, which the native only caught for two typed exceptions — anything else escaped into `-fno-exceptions` core = `std::terminate` (SIGABRT, the 1.3.11 CHI1 class, at the native boundary instead of the C-callback one). Added a trailing `catch (const std::exception&)` that logs via `MF_LogError` and returns -1.
+- **CU-01 — `curl_global_cleanup()` ran while the `CURLM*` was still alive.** On every clean fleet shutdown since `.928`+2.7.21 woke `OnAmxxDetach`, the multi was cleaned up only later, in the `~CurlMulti` destructor cascade during `dlclose` — i.e. `curl_multi_cleanup` after global teardown, UB per libcurl's contract (benign only on the vendored curl 7.63/OpenSSL 1.1, one bump from the CHI1 shutdown-crash class). `CurlMulti` now has an idempotent `Shutdown()` (`curl_multi_cleanup` + null); `OnAmxxDetach` calls it between `RemoveAllTasks()` and `curl_global_cleanup()`, and `~CurlMulti` calls it too.
+- **CU-05 — a failed `curl_multi_add_handle` left a permanent zombie handle.** `AmxCurl::Perform` set `is_transfer_in_progress_=true` before `AddCurl`, but `AddCurl`'s failure path (OOM-class) silently erased the completion callback (`DEBUG_LOG`, stripped in release) with no signal to the caller — so `OnPerformComplete` never fired, `IsAllTransfersCompleted()` stayed false forever (every subsequent shutdown drain burned the full 5s), and the `amx_callback_data_` buffer leaked. `AddCurl` now returns its `CURLMcode` and logs the failure via `MF_PrintSrvConsole` (release-visible); `Perform` resets the flag and frees/nulls the buffer on a non-`CURLM_OK` return.
+
+### Deferred (not in this cut)
+- CU-02 / CU-04 / CU-08 (PLAUSIBLE — no current fleet consumer exercises the path) and CU-06 / CU-09 (handle-reuse body concatenation — no fleet consumer reuses a handle) stay post-LAN.
+
 ## [1.3.14-ktp] - 2026-07-13
 
 ### Fixed

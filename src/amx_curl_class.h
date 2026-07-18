@@ -71,7 +71,18 @@ public:
         is_transfer_in_progress_ = true;
 
         CurlMulti::CurlPerformComplete callback = std::bind(&AmxCurl::OnPerformComplete, this, std::placeholders::_1);
-        curl_multi_.AddCurl(curl_, std::move(callback));
+        if (curl_multi_.AddCurl(curl_, std::move(callback)) != CURLM_OK)
+        {
+            // AddCurl (OOM-class curl_multi_add_handle failure) already erased the
+            // completion callback, so OnPerformComplete can never fire to clear
+            // these. Undo the in-progress state here or the handle is a permanent
+            // zombie: IsAllTransfersCompleted() stays false forever (every shutdown
+            // drain burns the full 5s) and amx_callback_data_ leaks.
+            is_transfer_in_progress_ = false;
+            delete[] amx_callback_data_;
+            amx_callback_data_ = nullptr;
+            amx_callback_data_len_ = 0;
+        }
     }
 
     bool get_is_transfer_in_progress() { return is_transfer_in_progress_; }

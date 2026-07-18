@@ -1,4 +1,6 @@
 #include "asio_poller.h"
+#include "sdk/amxxmodule.h"          // MF_PrintSrvConsole for the poll boundary catch
+#include "amx_curl_callback_class.h" // g_amxxcurl_detached — MF_* is stale once set
 
 using namespace std;
 using namespace asio::ip;
@@ -32,7 +34,22 @@ tcp::socket AsioPoller::WrapTcpSocket(const asio::detail::socket_type& native_so
 
 void AsioPoller::Poll()
 {
-    io_context_.poll();
+    // Outermost game-thread boundary. io_context::poll() rethrows anything an
+    // asio handler let escape (bad_alloc, a throwing timer.cancel(), an uncaught
+    // std::runtime_error from a curl completion callback). Unguarded, that
+    // unwinds through CurlFrameCallback / the OnAmxxDetach drain loop into
+    // ReHLDS's -fno-exceptions frame loop = std::terminate. Mirror the
+    // C-callback boundary catch (curl_multi_class.cc); io_context stays valid
+    // after a handler throws, so the stopped()/restart() check still runs.
+    try {
+        io_context_.poll();
+    } catch (const std::exception& ex) {
+        if (!g_amxxcurl_detached.load(std::memory_order_acquire))
+            MF_PrintSrvConsole("[CURL] FATAL ERROR caught at asio-poll boundary: %s\n", ex.what());
+    } catch (...) {
+        if (!g_amxxcurl_detached.load(std::memory_order_acquire))
+            MF_PrintSrvConsole("[CURL] FATAL ERROR caught at asio-poll boundary: unknown exception\n");
+    }
 
     if (io_context_.stopped())
         io_context_.restart();
