@@ -152,6 +152,16 @@ Version string lives in `src/sdk/moduleconfig.h` (`MODULE_VERSION`). Bump it
 for every shipped change, write the CHANGELOG.md entry with what/why + the
 md5 of the shipped binary, and update README's version header.
 
+## Docs check (not just the version line)
+If the change touched a build path, install path, or a diagnostic an operator is
+expected to act on, **verify the README still works from a clean clone's
+perspective — not from this tree**, and grep the whole stack for any old path
+string. The 2026-07-19 audit found "Building from Source" still documenting the
+Premake5 workflow this repo replaced with CMake in 1.3.7 — plausible enough to
+attempt, since a vestigial `premake5.lua` is still tracked. New `[CURL] WARNING`
+lines that mean "investigate immediately" belong in the README, not only in this
+skill. Full checklist: root `CLAUDE.md` → "Module / Engine Release Checklist".
+
 ## Comments
 Short, why-not-what, no ticket/finding IDs. Never delete a tripwire fact
 ("never fired in the field," "must not touch curl again") while trimming a

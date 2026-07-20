@@ -1,6 +1,9 @@
 # Local dev files (not committed)
-build_linux.sh
 nul
+
+# Claude Code per-machine settings. NOT a blanket .claude/ ignore —
+# .claude/skills/ is deliberately tracked.
+.claude/settings.local.json
 
 # SSH/deployment scripts (contain IPs and credentials)
 scripts/

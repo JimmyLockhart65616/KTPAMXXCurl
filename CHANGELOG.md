@@ -2,6 +2,63 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [Unreleased]
+
+### Documentation
+
+README's "Building from Source" still described the Premake5 workflow this repo
+replaced with CMake in **1.3.7** — `premake5 vs2017` / `premake5 gmake` /
+`premake5 clean`, and output in `bin/<config>/`. None of that works: the build is
+`build_linux.sh` (`cmake .. && make`), and the artifact is
+`build/amxxcurl_ktp_i386.so`. Rewritten, with a direct no-staging invocation for
+anyone who doesn't want the local test-tree copy.
+
+Noted while fixing: `premake5.lua` is still tracked despite being unreferenced by
+any build path. Left in place — removing it is a separate call — but it means the
+old instructions looked plausible enough to attempt. It now carries a
+legacy/unsupported header comment so it can't be mistaken for the build again.
+
+**Added a `## Diagnostics` section to the README.** The module emits nine distinct
+`[CURL] WARNING` lines and two `FATAL ERROR` boundary lines; the README documented
+none of them, describing `[CURL]` output only as "registration success/failure".
+The one that mattered: `stale socket_map_ entry for fd N on open` means libcurl
+violated its own close-callback contract and has never fired in the field — its
+"investigate immediately" severity was recorded only in `.claude/skills/`, which
+no server operator reads. It now sits in an operator-facing table alongside the
+genuinely benign warnings it was indistinguishable from, and the two
+in-flight-handle *refusals* (1.3.14) are documented as the contract change plugin
+authors can hit, not just as log lines.
+
+**"Verify Installation" told operators to look for a string the module never
+prints** — `[CURL] Module loaded successfully`. The real lines are
+`[CURL] Module loaded (extension mode, using frame callbacks)` and, when the
+frame-callback API is absent, a bare `[CURL] Module loaded`. That distinction is
+the whole point of the check: the bare form means the module loaded but async
+will never run.
+
+**Three of fifteen registered natives were missing from the API Reference** —
+`curl_get_response_body` (described in prose but never given a signature) plus
+`curl_formadd` / `curl_formfree`, added under a Forms heading that carries their
+upstream `#pragma deprecated` status rather than presenting them as recommended.
+
+**README header said 1.3.15 while the first section said "What's New in v1.3.5"**,
+followed by a seven-release "Previous:" chain that skipped 1.3.2 and stopped ten
+releases short. Collapsed to a single 1.3.15 block plus the CHANGELOG link; the
+still-current behavioral facts live in Features / API Reference / Diagnostics as
+current behavior instead of as release history.
+
+**`modules.ini` snippets** now show the bare `amxxcurl` the deployed config
+actually uses, rather than a platform-split `.dll`/`.so` pair.
+
+**`.gitignore` asserted the opposite of the tracked state** — it listed
+`build_linux.sh` under "not committed" while that file is tracked and is *the*
+documented build command. Removed. Added `.claude/settings.local.json` (per-machine
+state, and this repo is public) as a targeted entry — deliberately not a blanket
+`.claude/` ignore, since `.claude/skills/` is intentionally tracked.
+
+**`CLAUDE.md`** listed `bin/ReleaseDLL/` as the build output — a Premake-era path
+no current build produces.
+
 ## [1.3.15-ktp] - 2026-07-18
 
 Crash-safety + resource-leak hardening from the 2026-07-15 stack review (CU-01/03/05/07, all P2/CONFIRMED). Binary md5 `fd6160057bf5d997d7d20b6fa7f8c1df`. Module-internal only — no plugin recompile (no `.inc` / native-signature change).

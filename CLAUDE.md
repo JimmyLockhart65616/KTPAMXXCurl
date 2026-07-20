@@ -17,7 +17,7 @@ This will:
 - `build_linux.sh` - WSL build script
 - `CMakeLists.txt` - CMake build configuration
 - `src/` - C++ source files
-- `bin/ReleaseDLL/` - Build output
+- `build/` - Build output (`amxxcurl_ktp_i386.so`)
 - `amx_includes/` - AMX include files for plugins using this module
 
 ## Purpose

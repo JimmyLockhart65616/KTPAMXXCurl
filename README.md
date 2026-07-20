@@ -8,94 +8,19 @@ Part of the [KTP Competitive Infrastructure](https://github.com/afraznein).
 
 ---
 
-## What's New in v1.3.5-ktp
+## What's New in v1.3.15-ktp
 
-### Async Safety + POSTFIELDS Fix
+Crash-safety and resource-leak hardening: the outermost game-thread asio boundary
+is now exception-guarded, an unsupported `FUNCTIONPOINT` curl option no longer
+aborts the server at the native boundary, `curl_global_cleanup()` no longer runs
+while the multi handle is still alive, and a failed `curl_multi_add_handle` no
+longer leaves a permanent zombie handle. Module-internal only — no plugin
+recompile (no `.inc` or native-signature change).
 
-- **`CURLOPT_POSTFIELDS` auto-upgraded to `CURLOPT_COPYPOSTFIELDS`** — Prevents stale pointer reads from `MF_GetAmxString` static buffer during async perform
-- **`RemoveAllTasks` detach safety** — Removes handles from curl_multi before destroying, preventing undefined behavior
-- **IOCTL interrupt code corrected** — `CURLIOE_UNKNOWNCMD` → `CURLIOE_FAILRESTART`
-- **`curl_multi_add_handle` error logging** — Now checks return code and logs on failure
-- **`curl_formadd` heap allocation** — Static aliasing risk with `CURLFORM_PTRCONTENTS` eliminated
-
-## Previous: v1.3.4-ktp
-
-### In-Flight Callback Safety
-
-- **AMX validity checks in all libcurl callbacks** — All 10 callback methods now verify the plugin is still loaded before calling into Pawn, preventing segfaults from stale AMX pointers during slow transfers across map changes
-- **Deferred cleanup for in-flight handles** — `curl_easy_cleanup` on an active transfer now interrupts and defers destruction instead of causing use-after-free
-- **Detach timeout** — Module detach now interrupts all transfers before waiting, with a poll timeout to prevent indefinite hangs
-- **Response body cap** — Auto-buffered responses capped at 64KB with truncation warning
-- **Move constructor fix** — `is_transfer_in_progress_` now properly copied, preventing UB
-
-## Previous: v1.3.3-ktp
-
-### Stale AMX Pointer Validation
-
-- **Fixed segfault when plugin unloaded during async transfer** -- Validates AMX pointer via `MF_FindScriptByAmx()` before invoking the completion callback.
-
-## Previous: v1.3.1-ktp
-
-### Bug Fixes
-
-- **Fixed `curl_easy_unescape` returning escaped data** — copy-paste bug caused the unescape native to call the escape function
-- **Fixed server crash on invalid callback name** — `curl_easy_perform` with a non-existent callback function now logs an error instead of crashing via unhandled exception
-- **Fixed potential infinite loop on module detach** — uninitialized `is_transfer_in_progress_` flag could cause `OnAmxxDetach` to hang indefinitely
-- **Fixed corrupted error messages in `BindCallback`** — pointer arithmetic on string literal replaced with `curl_easy_strerror()`
-
-## Previous: v1.3.0-ktp
-
-### Built-in Response Body Capture
-
-New `curl_get_response_body()` native eliminates the need for Pawn-level `WRITEFUNCTION` callbacks to capture HTTP response bodies. When no write callback is set, the module automatically buffers response data in C++. This fixes recurring segfaults caused by `MF_ExecuteForward` → `amx_Allot` failures in the Pawn callback path.
-
-## Previous: v1.2.1-ktp
-
-### Forward Registration Validation & Diagnostics
-
-This release fixes silent callback failures that prevented Discord embeds from capturing responses:
-
-- **Forward validation** - `SetupAmxCallback()` now validates `MF_RegisterSPForwardByName` return value
-- **Graceful fallback** - If write callback registration fails, accepts data silently instead of aborting transfer
-- **Diagnostic logging** - `[CURL]` prefixed console messages for registration success/failure
-- **WriteCallback safety** - Double-checks forward ID validity before execution
-
-**Root cause:** `MF_RegisterSPForwardByName` returns -1 when function not found. Previously stored without validation, causing `MF_ExecuteForward(-1)` to return 0, which curl interprets as "abort transfer".
-
----
-
-## What's New in v1.2.0-ktp
-
-### Critical Segfault Fixes
-
-This release fixes several critical memory safety issues that caused server crashes:
-
-- **Use-after-free fix** - Async socket callbacks now use `shared_ptr<SocketData>` instead of raw pointers
-- **Handle allocation fix** - Fixed `count() > 1` bug that caused handle collisions
-- **Socket map cleanup** - Non-ARES sockets now properly removed from tracking maps
-- **Callback validation** - All 10 callback functions now validate registration before execution
-
----
-
-## v1.1.1-ktp - KTPAMXX Integration
-
-### No Metamod Required
-
-KTP CURL AMXX operates as a pure AMXX module using KTPAMXX's frame callback API:
-
-| Feature | Original AmxxCurl | KTP CURL AMXX |
-|---------|------------------|---------------|
-| Dependencies | AMX Mod X + Metamod | KTPAMXX only |
-| Frame processing | Metamod StartFrame hook | Module frame callback |
-| Binary | `amxxcurl_ktp_i386.dll/so` | KTP renamed |
-| Performance | Standard | Identical |
-| Compatibility | Requires Metamod | No Metamod needed |
-
-### KTP Integration
-
-- Uses `MF_RegModuleFrameFunc()` API for async processing
-- Graceful fallback if API not available
-- Compatible with KTP competitive infrastructure stack
+See [CHANGELOG.md](CHANGELOG.md) for the full history. Behavior worth knowing
+about that arrived in earlier releases is documented as current behavior under
+[Features](#features), [API Reference](#api-reference) and
+[Diagnostics](#diagnostics) rather than repeated here.
 
 ---
 
@@ -148,10 +73,9 @@ cp amxxcurl_ktp_i386.so "<game>/addons/ktpamx/modules/"
 
 Edit `<game>/addons/ktpamx/configs/modules.ini`:
 ```ini
-; KTP CURL module
-amxxcurl_ktp_i386.dll  ; Windows
-; OR
-amxxcurl_ktp_i386.so   ; Linux
+; KTP CURL module — the bare name is platform-independent;
+; KTPAMXX appends the _ktp_i386.so / .dll suffix itself.
+amxxcurl
 ```
 
 ### Step 4: Install Include Files
@@ -165,8 +89,12 @@ cp amx_includes/*.inc "<amxmodx>/scripting/include/"
 
 Check server console on startup:
 ```
-[CURL] Module loaded successfully
+[CURL] Module loaded (extension mode, using frame callbacks)
 ```
+
+That is the line to expect on KTPAMXX. If you instead see the bare
+`[CURL] Module loaded`, the frame-callback API was not found — the module is
+loaded but async transfers will never be processed. See [Diagnostics](#diagnostics).
 
 ---
 
@@ -224,6 +152,21 @@ native curl_easy_strerror(const CURLcode:code, buffer[], const maxlen);
 
 // Get libcurl version string
 native curl_version(buffer[], const maxlen);
+
+// Read the captured response body — no WRITEFUNCTION callback needed.
+// Captured up to a 64KB cap; beyond that the body is truncated and a
+// [CURL] WARNING is printed.
+native curl_get_response_body(const CURL:handle, buffer[], const maxlen);
+```
+
+### Forms (deprecated)
+
+Both are registered and functional, but carry libcurl's upstream deprecation —
+`#pragma deprecated` in `curl.inc`. Prefer building the body yourself.
+
+```pawn
+native CURLFORMcode: curl_formadd(&curl_httppost: first, &curl_httppost: last, any: ...);
+native curl_formfree(&curl_httppost: first);
 ```
 
 ### Callback Signatures
@@ -329,42 +272,31 @@ public upload_file_ftp() {
 
 ### Prerequisites
 
-- **Premake5** - [Get it here](https://github.com/premake/premake-core)
-- **Windows**: Visual Studio 2017+
-- **Linux**: GCC with multilib support
+- **CMake** >= 3.1
+- **GCC** with 32-bit multilib (`sudo apt-get install gcc-multilib g++-multilib`)
 
-### Windows Build
+### Build
 
 ```bash
-# Generate Visual Studio project
-premake5 vs2017
-
-# Open solution and build
-# Or use MSBuild from command line
+bash build_linux.sh
 ```
 
-### Linux Build
+That is the canonical entry point: it runs `cmake .. && make -j$(nproc)` in a
+clean `build/` dir, then auto-stages the module into the local
+`KTP DoD Server/serverfiles/` test tree if that tree exists.
+
+To build without staging, do it directly:
 
 ```bash
-# Generate Makefile
-premake5 gmake
-
-# Build
-cd build/gmake
-make
+mkdir -p build && cd build && cmake .. && make -j$(nproc)
 ```
 
 ### Build Output
 
-Binaries are placed in `bin/<config>/`:
-- `amxxcurl_ktp_i386.dll` (Windows)
-- `amxxcurl_ktp_i386.so` (Linux)
+`build/amxxcurl_ktp_i386.so`
 
-### Clean Build
-
-```bash
-premake5 clean
-```
+> **Note:** the build migrated from Premake5 to CMake in 1.3.7. A vestigial
+> `premake5.lua` is still in the tree but is not used by any build path.
 
 ---
 
@@ -428,6 +360,40 @@ premake5 clean
 - **Requires KTPAMXX** for proper async operation
 - Standard AMX Mod X lacks `MF_RegModuleFrameFunc()` API
 - Module gracefully handles missing API but transfers won't process
+
+---
+
+## Diagnostics
+
+Every console line the module emits is prefixed `[CURL]`. Most are informational;
+one is not.
+
+### Startup
+
+| Line | Meaning |
+|------|---------|
+| `[CURL] Module loaded (extension mode, using frame callbacks)` | Expected on KTPAMXX. Async transfers will be processed. |
+| `[CURL] Module loaded` | `MF_RegModuleFrameFunc()` was not found. The module loaded, but **nothing drives transfers to completion** — async will not run. |
+
+### Warnings
+
+| Line | Action |
+|------|--------|
+| `WARNING: stale socket_map_ entry for fd N on open — close callback was missed` | **Investigate immediately.** It means libcurl violated its own close-callback contract. It has never fired in the field. Do not silence it. |
+| `WARNING: Detach timeout after 5s, forcing cleanup` | A transfer did not wind down during shutdown. Cleanup proceeds; worth noting if it recurs. |
+| `WARNING: detach-guard atexit registration failed (N)` | The shutdown guard could not register. Raises the risk of a segfault at process exit. |
+| `WARNING: Plugin unloaded during async transfer (AMX ... no longer valid)` | Benign. The completion callback is skipped because its owner is gone. |
+| `WARNING: Response body reached NB cap — truncating further data` | Benign. The response exceeded the 64KB `curl_get_response_body` buffer. |
+| `WARNING: curl_easy_cleanup called on handle N while transfer is in progress — deferring cleanup` | Benign. Cleanup runs when the transfer finishes. |
+| `WARNING: curl_easy_perform called on handle N while a transfer is already in progress — ignoring` | Plugin bug. The call is **refused** (1.3.14+) rather than corrupting the in-flight transfer. |
+| `WARNING: curl_easy_reset called on handle N while transfer is in progress — ignoring` | Plugin bug, same contract as above. |
+
+### Fatal
+
+`[CURL] FATAL ERROR caught at asio-poll boundary` / `at C-callback boundary` — an
+exception reached a C callback boundary and was contained there. Escaping it would
+unwind through C and take the server down, so this line means the crash was
+prevented, not that it happened. Report it.
 
 ---
 

@@ -1,3 +1,6 @@
+-- LEGACY / UNSUPPORTED. The build migrated to CMake in 1.3.7; this file drives
+-- no current build path and is not maintained. Use build_linux.sh.
+
 -- Clean Function --
 newaction {
   trigger     = "clean",
