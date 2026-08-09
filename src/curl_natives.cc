@@ -231,9 +231,8 @@ static cell AMX_NATIVE_CALL amx_curl_easy_getinfo(AMX* amx, cell* params)
             }
         }
         else if (curlinfo_mask == CURLINFO_SLIST) {
-            // The worst of the four: an uninitialized pointer written through to
-            // Pawn, which can hand it straight to curl_slist_free_all -- a free of
-            // a wild address on the game thread.
+            // curl_slist_free_all casts this cell straight back and frees it --
+            // never hand Pawn an ungated pointer.
             curl_slist* csl = nullptr;
             ret_code = manager.CurlGetInfo(curl_handle, curl_info, csl);
 

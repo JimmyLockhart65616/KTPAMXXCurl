@@ -16,9 +16,13 @@ All notable changes to KTP CURL AMXX will be documented in this file.
   stack value as the answer. The SLIST case handed Pawn an uninitialized
   *pointer*, and the module exposes `curl_slist_free_all`, which would free it —
   a wild free on the game thread. All four are now initialized and the writeback
-  is gated on `CURLE_OK`. Not reachable from any current fleet plugin (all four
-  live call sites use `CURLINFO_RESPONSE_CODE`, which always returns OK), but it
-  is the same defect class in the same function.
+  is gated on `CURLE_OK`. Not reachable from any current fleet plugin — every live
+  call site uses `CURLINFO_RESPONSE_CODE`, which always returns OK — but it
+  is the same defect class in the same function. On a non-OK result the cell is
+  now left as the plugin passed it in, which for a Pawn `new` local is a
+  deterministic 0 rather than stack garbage — so the two call sites that branch on
+  the code now fail closed instead of possibly reading garbage inside 200-299 and
+  reporting success.
 - A reused easy handle's `curl_get_response_body` returned the *previous*
   transfer's body concatenated with the new one. `ClearResponseBody()` existed but
   had no callers; it is now called from `Perform()`, after the

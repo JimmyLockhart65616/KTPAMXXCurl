@@ -17,7 +17,11 @@ a failed callback re-registration no longer leaves a freed forward id that AMXX
 can recycle for an unrelated forward; and every `curl_easy_getinfo` branch now
 initializes its local and gates the writeback on `CURLE_OK`. That last one
 mattered most for `CURLINFO_SLIST`, which handed Pawn an uninitialized pointer
-that `curl_slist_free_all` would free. Module-internal only — no plugin recompile
+that `curl_slist_free_all` would free — though the one a third party could
+actually reach was `CURLINFO_STRING`: it passed libcurl's `char*` to
+`MF_SetAmxString` unchecked, and libcurl returns `CURLE_OK` with a null pointer
+for an absent header, so a remote server omitting `Content-Type` was enough to
+segfault the game thread. Module-internal only — no plugin recompile
 (no `.inc` or native-signature change).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history. Behavior worth knowing
