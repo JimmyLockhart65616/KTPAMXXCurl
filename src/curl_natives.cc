@@ -210,26 +210,38 @@ static cell AMX_NATIVE_CALL amx_curl_easy_getinfo(AMX* amx, cell* params)
         }
         else if (curlinfo_mask == CURLINFO_LONG || curlinfo_mask == CURLINFO_SOCKET)
         {
-            long num;
+            long num = 0;
             ret_code = manager.CurlGetInfo(curl_handle, curl_info, num);
 
-            cell* ret = MF_GetAmxAddr(amx, params[3]);
-            *ret = num;
+            if (ret_code == CURLE_OK)
+            {
+                cell* ret = MF_GetAmxAddr(amx, params[3]);
+                *ret = num;
+            }
         }
         else if (curlinfo_mask == CURLINFO_DOUBLE)
         {
-            double num;
+            double num = 0.0;
             ret_code = manager.CurlGetInfo(curl_handle, curl_info, num);
 
-            cell* ret = MF_GetAmxAddr(amx, params[3]);
-            *ret = amx_ftoc(num);
+            if (ret_code == CURLE_OK)
+            {
+                cell* ret = MF_GetAmxAddr(amx, params[3]);
+                *ret = amx_ftoc(num);
+            }
         }
         else if (curlinfo_mask == CURLINFO_SLIST) {
-            curl_slist* csl;
+            // The worst of the four: an uninitialized pointer written through to
+            // Pawn, which can hand it straight to curl_slist_free_all -- a free of
+            // a wild address on the game thread.
+            curl_slist* csl = nullptr;
             ret_code = manager.CurlGetInfo(curl_handle, curl_info, csl);
 
-            cell* ret = MF_GetAmxAddr(amx, params[3]);
-            *ret = reinterpret_cast<cell>(csl);
+            if (ret_code == CURLE_OK)
+            {
+                cell* ret = MF_GetAmxAddr(amx, params[3]);
+                *ret = reinterpret_cast<cell>(csl);
+            }
         }
         else
         {
