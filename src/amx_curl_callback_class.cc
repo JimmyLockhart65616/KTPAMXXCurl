@@ -40,7 +40,12 @@ void CurlCallbackAmx::ResetAmxCallbacks()
 void CurlCallbackAmx::SetupAmxCallback(CURLoption callback_option, const char* amx_function_name)
 {
     if (registered_callbacks_.count(callback_option) > 0)
+    {
+        // Erase with the unregister: if the re-registration below fails, a kept
+        // entry hands the data callbacks a freed forward id that AMXX recycles.
         MF_UnregisterSPForward(registered_callbacks_[callback_option]);
+        registered_callbacks_.erase(callback_option);
+    }
 
     AmxForward forwardId = -1;
 

@@ -199,11 +199,14 @@ static cell AMX_NATIVE_CALL amx_curl_easy_getinfo(AMX* amx, cell* params)
     {
         if (curlinfo_mask == CURLINFO_STRING)
         {
-            char* str;
+            // Initialized, and NULL-checked on the way out: libcurl returns
+            // CURLE_OK with a null pointer for an absent header (a missing
+            // Content-Type is enough), and the value is remote-controlled.
+            char* str = nullptr;
             ret_code = manager.CurlGetInfo(curl_handle, curl_info, str);
 
             if (ret_code == CURLE_OK)
-                MF_SetAmxString(amx, params[3], str, params[4]);
+                MF_SetAmxString(amx, params[3], str ? str : "", params[4]);
         }
         else if (curlinfo_mask == CURLINFO_LONG || curlinfo_mask == CURLINFO_SOCKET)
         {

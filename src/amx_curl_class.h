@@ -70,6 +70,10 @@ public:
         task_handle_ = task_handle;
         is_transfer_in_progress_ = true;
 
+        // Drop the previous transfer's auto-buffered body HERE, not in the
+        // completion path -- it must survive into curl_get_response_body.
+        curl_callback_->ClearResponseBody();
+
         CurlMulti::CurlPerformComplete callback = std::bind(&AmxCurl::OnPerformComplete, this, std::placeholders::_1);
         if (curl_multi_.AddCurl(curl_, std::move(callback)) != CURLM_OK)
         {
