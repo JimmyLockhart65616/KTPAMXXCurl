@@ -70,10 +70,6 @@ public:
         task_handle_ = task_handle;
         is_transfer_in_progress_ = true;
 
-        // Drop the previous transfer's auto-buffered body HERE, not in the
-        // completion path -- it must survive into curl_get_response_body.
-        curl_callback_->ClearResponseBody();
-
         CurlMulti::CurlPerformComplete callback = std::bind(&AmxCurl::OnPerformComplete, this, std::placeholders::_1);
         if (curl_multi_.AddCurl(curl_, std::move(callback)) != CURLM_OK)
         {
@@ -86,7 +82,15 @@ public:
             delete[] amx_callback_data_;
             amx_callback_data_ = nullptr;
             amx_callback_data_len_ = 0;
+            return;
         }
+
+        // Past every failure exit, so a perform that did not start preserves the
+        // previous body. Clearing in the completion path instead would be wrong --
+        // the body has to survive into curl_get_response_body. Safe here: nothing
+        // writes to it between curl_multi_add_handle and the first socket action,
+        // which the poller drives on a later frame.
+        curl_callback_->ClearResponseBody();
     }
 
     bool get_is_transfer_in_progress() { return is_transfer_in_progress_; }
