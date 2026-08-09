@@ -8,14 +8,17 @@ Part of the [KTP Competitive Infrastructure](https://github.com/afraznein).
 
 ---
 
-## What's New in v1.3.15-ktp
+## What's New in v1.3.16-ktp
 
-Crash-safety and resource-leak hardening: the outermost game-thread asio boundary
-is now exception-guarded, an unsupported `FUNCTIONPOINT` curl option no longer
-aborts the server at the native boundary, `curl_global_cleanup()` no longer runs
-while the multi handle is still alive, and a failed `curl_multi_add_handle` no
-longer leaves a permanent zombie handle. Module-internal only — no plugin
-recompile (no `.inc` or native-signature change).
+Correctness on handle reuse and on reading a transfer back. A reused easy handle
+no longer returns the previous transfer's body concatenated with the new one (and
+no longer pins itself at the body cap, returning truncated output from then on);
+a failed callback re-registration no longer leaves a freed forward id that AMXX
+can recycle for an unrelated forward; and every `curl_easy_getinfo` branch now
+initializes its local and gates the writeback on `CURLE_OK`. That last one
+mattered most for `CURLINFO_SLIST`, which handed Pawn an uninitialized pointer
+that `curl_slist_free_all` would free. Module-internal only — no plugin recompile
+(no `.inc` or native-signature change).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history. Behavior worth knowing
 about that arrived in earlier releases is documented as current behavior under

@@ -2,7 +2,36 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
-## [Unreleased]
+## [1.3.16-ktp] - 2026-08-09
+
+### Fixed
+- `curl_easy_getinfo` on a `CURLINFO_STRING` passed libcurl's `char*` straight to
+  `MF_SetAmxString` with no NULL check, and the local was uninitialized. libcurl
+  returns `CURLE_OK` with a null pointer for an absent header — a response with
+  no `Content-Type` is enough — so a remote server could segfault the game thread
+  by omitting a header. Now initialized and substituted with an empty string.
+- The LONG/SOCKET, DOUBLE and SLIST branches of the same function had the same
+  uninitialized local and were **worse**: they wrote it through to Pawn with no
+  success check at all, so a non-OK `curl_easy_getinfo` returned an uninitialized
+  stack value as the answer. The SLIST case handed Pawn an uninitialized
+  *pointer*, and the module exposes `curl_slist_free_all`, which would free it —
+  a wild free on the game thread. All four are now initialized and the writeback
+  is gated on `CURLE_OK`. Not reachable from any current fleet plugin (all four
+  live call sites use `CURLINFO_RESPONSE_CODE`, which always returns OK), but it
+  is the same defect class in the same function.
+- A reused easy handle's `curl_get_response_body` returned the *previous*
+  transfer's body concatenated with the new one. `ClearResponseBody()` existed but
+  had no callers; it is now called from `Perform()`, after the
+  `MF_AmxFindPublic` throw so a failed perform preserves the prior body. Clearing
+  in the completion path instead would be wrong — the body has to survive into
+  `curl_get_response_body`.
+- `SetupAmxCallback()` unregistered the old SP forward but kept its id in
+  `registered_callbacks_` when re-registration failed (bad function name, or the
+  unsupported-option throw). The data callbacks then dispatched through a freed
+  forward id that AMXX is free to recycle for an unrelated forward. The entry is
+  now erased with the unregister, so a failed re-registration leaves the option
+  with no entry — which is the state every data callback already treats as
+  "fall back gracefully".
 
 ### Documentation
 
@@ -58,37 +87,6 @@ state, and this repo is public) as a targeted entry — deliberately not a blank
 
 **`CLAUDE.md`** listed `bin/ReleaseDLL/` as the build output — a Premake-era path
 no current build produces.
-
-## [1.3.16-ktp] - 2026-08-09
-
-### Fixed
-- `curl_easy_getinfo` on a `CURLINFO_STRING` passed libcurl's `char*` straight to
-  `MF_SetAmxString` with no NULL check, and the local was uninitialized. libcurl
-  returns `CURLE_OK` with a null pointer for an absent header — a response with
-  no `Content-Type` is enough — so a remote server could segfault the game thread
-  by omitting a header. Now initialized and substituted with an empty string.
-- The LONG/SOCKET, DOUBLE and SLIST branches of the same function had the same
-  uninitialized local and were **worse**: they wrote it through to Pawn with no
-  success check at all, so a non-OK `curl_easy_getinfo` returned an uninitialized
-  stack value as the answer. The SLIST case handed Pawn an uninitialized
-  *pointer*, and the module exposes `curl_slist_free_all`, which would free it —
-  a wild free on the game thread. All four are now initialized and the writeback
-  is gated on `CURLE_OK`. Not reachable from any current fleet plugin (all four
-  live call sites use `CURLINFO_RESPONSE_CODE`, which always returns OK), but it
-  is the same defect class in the same function.
-- A reused easy handle's `curl_get_response_body` returned the *previous*
-  transfer's body concatenated with the new one. `ClearResponseBody()` existed but
-  had no callers; it is now called from `Perform()`, after the
-  `MF_AmxFindPublic` throw so a failed perform preserves the prior body. Clearing
-  in the completion path instead would be wrong — the body has to survive into
-  `curl_get_response_body`.
-- `SetupAmxCallback()` unregistered the old SP forward but kept its id in
-  `registered_callbacks_` when re-registration failed (bad function name, or the
-  unsupported-option throw). The data callbacks then dispatched through a freed
-  forward id that AMXX is free to recycle for an unrelated forward. The entry is
-  now erased with the unregister, so a failed re-registration leaves the option
-  with no entry — which is the state every data callback already treats as
-  "fall back gracefully".
 
 ## [1.3.15-ktp] - 2026-07-18
 
