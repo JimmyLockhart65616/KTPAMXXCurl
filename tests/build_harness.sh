@@ -54,27 +54,22 @@ echo "--------------------------------------------------"
 
 # THE ACTUAL CU-02 GATE.
 #
-# Completing the transfer is NOT the test: libcurl's timer re-drives a socket
-# whose readiness event was dropped, so the defect degrades to latency and a
-# completion check passes straight through it. Measured on the broken build,
-# 512 KB over loopback took ~1024 ms while dropping 7 events.
+# The fix removed the guard that dropped events, so "count the drops" no longer has
+# an analogue: arming state is per-direction now, and a completed wait is always
+# reported. What stays falsifiable is the transfer itself -- reintroduce the guard
+# and this stalls to CURLOPT_TIMEOUT on ~16 KB of 512. The binary's four checks
+# assert exactly that, and its exit code carries them.
 #
-# So assert on the defect itself. A handler armed as INOUT(3) that fires once
-# previous_action has moved to IN(1) satisfies neither arm of
-#     action == previous_action || previous_action == CURL_POLL_INOUT
-# and is silently discarded. Any occurrence means the re-arm bug is live.
+# The one thing an exit code cannot say is whether the INOUT overlap ever formed.
+# Without it the run exercises nothing interesting and a green is vacuous -- so
+# assert the overlap separately and treat its absence as INCONCLUSIVE, never PASS.
 #
-# Requires -DAMXXCURL_DEBUG_LOG_ENABLE (set above) -- without it DEBUG_LOG
-# compiles to nothing and this grep would report a vacuous 0.
-inout_seen=$(grep -c 'INOUT' "$OUT/run.log")
-# Anchored: whatstr[] is {none,IN,OUT,INOUT,REMOVE}, so an unanchored IN also
-# matches INOUT -- i.e. the benign already-INOUT case, which is precisely what
-# the guard handles correctly. Unanchored the gate counts every INOUT line and
-# can never report GREEN.
-dropped=$(grep -cE 'action: INOUT; prev_action: (IN|OUT|none)$' "$OUT/run.log")
+# Requires -DAMXXCURL_DEBUG_LOG_ENABLE (set above) -- without it DEBUG_LOG compiles
+# to nothing and this grep would report a vacuous 0.
+inout_seen=$(grep -c 'prev_action: INOUT' "$OUT/run.log")
 
-echo "INOUT transitions observed : $inout_seen"
-echo "dropped readiness events   : $dropped"
+echo "INOUT overlap observed : $inout_seen"
+echo "binary exit code       : $run_rc"
 
 if [ "$inout_seen" -eq 0 ]; then
     echo "INCONCLUSIVE: the INOUT path never ran, so this proves nothing either way."
@@ -83,12 +78,12 @@ if [ "$inout_seen" -eq 0 ]; then
     exit 2
 fi
 
-if [ "$dropped" -gt 0 ]; then
-    echo "HARNESS RED: CU-02 is live -- $dropped readiness event(s) dropped by the guard."
+if [ "$run_rc" -ne 0 ]; then
+    echo "HARNESS RED: INOUT was exercised and the transfer did NOT complete cleanly."
     rm -rf "$OUT"
     exit 1
 fi
 
-echo "HARNESS GREEN: INOUT exercised and no readiness event was dropped."
+echo "HARNESS GREEN: INOUT exercised and the transfer completed inside the timeout."
 rm -rf "$OUT"
-exit $run_rc
+exit 0

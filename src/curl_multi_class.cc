@@ -323,8 +323,17 @@ int CurlMulti::CurlTimerCallback(CURLM* multi, long timeout_ms)
 }
 
 // calls by asio when data r/w is ready
-void CurlMulti::AsioSocketActionCallback(int action, curl_socket_t s, SocketDataPtr socket_data, const asio::error_code& error)
+void CurlMulti::AsioSocketActionCallback(int dir, curl_socket_t s, SocketDataPtr socket_data, const asio::error_code& error)
 {
+    // This wait is done — fired, cancelled or errored. Clear before ANY early
+    // return: a flag left set makes the direction look permanently armed and
+    // nothing ever re-arms it.
+    if (socket_data)
+    {
+        if (dir == CURL_POLL_IN) socket_data->read_armed  = false;
+        else                     socket_data->write_armed = false;
+    }
+
     // Destroyed while a wait was pending (shutdown) — the bound `this` is gone.
     if (curl_multi_ == nullptr)
     {
@@ -356,42 +365,42 @@ void CurlMulti::AsioSocketActionCallback(int action, curl_socket_t s, SocketData
         return;
     }
 
-    DEBUG_LOG("Asio cb | socket triggered; socket: %d; is_ares_socket: %d; action: %s; prev_action: %s\n", s, socket_data->is_ares_socket, whatstr[action], whatstr[socket_data->previous_action]);
+    DEBUG_LOG("Asio cb | socket triggered; socket: %d; is_ares_socket: %d; dir: %s; prev_action: %s\n", s, socket_data->is_ares_socket, whatstr[dir], whatstr[socket_data->previous_action]);
 
-    if (error || action == socket_data->previous_action || socket_data->previous_action == CURL_POLL_INOUT)
+    // There is deliberately no "should we report this?" guard any more. That guard
+    // compared the arming action against previous_action and silently discarded any
+    // event the two disagreed on — which is exactly the INOUT->IN case, where the
+    // still-pending read wait was the only thing that could have driven the transfer.
+    //
+    // ev_bitmask takes CURL_CSELECT_*, not CURL_POLL_*. IN/OUT happen to share
+    // values, but they are different enums; map explicitly rather than rely on it.
+    int ev = (dir == CURL_POLL_IN) ? CURL_CSELECT_IN : CURL_CSELECT_OUT;
+    if (error)
+        ev = CURL_CSELECT_ERR;
+
+    removed_sockets_.clear();
+    curl_multi_socket_action(curl_multi_, s, ev, &running_handles_);
+
+    CheckMultiInfo();
+
+    if (running_handles_ <= 0)
     {
-        if (error)
-            action = CURL_CSELECT_ERR;
+        asio_poller_.get_timer().cancel();
+        DEBUG_LOG("          cancel timer (no more handles)\n");
+    }
 
-        removed_sockets_.clear();
-        curl_multi_socket_action(curl_multi_, s, action, &running_handles_);
-
-        CheckMultiInfo();
-
-        if (running_handles_ <= 0)
-        {
-            asio_poller_.get_timer().cancel();
-            DEBUG_LOG("          cancel timer (no more handles)\n");
-        }
-
-        /* keep on watching.
-         * the socket may have been closed and/or socket_data may have been changed
-         * in curl_multi_socket_action(), so check them both */
-        if (   !error
-            && !removed_sockets_.count(s)
-            && socket_map_.find(s) != socket_map_.end()
-            && socket_data_map_.count(s) > 0  // Verify socket_data still tracked
-            && (action == socket_data->previous_action || socket_data->previous_action == CURL_POLL_INOUT))
-        {
-            auto& tcp_socket = socket_map_.find(s)->second;
-
-            // Pass shared_ptr to async callback - prevents use-after-free
-            if (action & CURL_POLL_IN)
-                tcp_socket.async_wait(asio::socket_base::wait_type::wait_read, std::bind(&CurlMulti::AsioSocketActionCallback, this, action, s, socket_data, _1));
-
-            if (action & CURL_POLL_OUT)
-                tcp_socket.async_wait(asio::socket_base::wait_type::wait_write, std::bind(&CurlMulti::AsioSocketActionCallback, this, action, s, socket_data, _1));
-        }
+    /* keep on watching.
+     * the socket may have been closed and/or socket_data may have been changed
+     * in curl_multi_socket_action(), so check them both */
+    if (   !error
+        && !removed_sockets_.count(s)
+        && socket_map_.find(s) != socket_map_.end()
+        && socket_data_map_.count(s) > 0)  // Verify socket_data still tracked
+    {
+        // Re-arm from what libcurl wants NOW — curl_multi_socket_action above may
+        // have changed it. ArmWaits skips anything already pending, so a direction
+        // libcurl has dropped simply stops being renewed.
+        ArmWaits(socket_data->previous_action, s, socket_data);
     }
 }
 
@@ -459,34 +468,34 @@ void CurlMulti::SetSock(int act, curl_socket_t s, SocketDataPtr socket_data)
         return;
     }
 
+    ArmWaits(act, s, socket_data);
+    socket_data->previous_action = act;
+}
+
+// Arms each direction libcurl wants that is not already pending. CURL_POLL_REMOVE
+// masks to neither bit, so it arms nothing.
+void CurlMulti::ArmWaits(int act, curl_socket_t s, SocketDataPtr socket_data)
+{
+    auto it = socket_map_.find(s);
+    if (it == socket_map_.end())
+        return;
+
     asio::ip::tcp::socket& tcp_socket = it->second;
 
-    // Pass shared_ptr to async callbacks - prevents use-after-free
-    if (act == CURL_POLL_IN)
+    // Bind the DIRECTION, not `act`: an INOUT-armed handler could not tell libcurl
+    // which way it fired and reported both, claiming readiness that never happened.
+    // shared_ptr into the handler prevents use-after-free.
+    if ((act & CURL_POLL_IN) && !socket_data->read_armed)
     {
-        if (socket_data->previous_action != CURL_POLL_IN && socket_data->previous_action != CURL_POLL_INOUT)
-        {
-            tcp_socket.async_wait(asio::socket_base::wait_type::wait_read, std::bind(&CurlMulti::AsioSocketActionCallback, this, act, s, socket_data, _1));
-        }
-    }
-    else if (act == CURL_POLL_OUT)
-    {
-        if (socket_data->previous_action != CURL_POLL_OUT && socket_data->previous_action != CURL_POLL_INOUT)
-        {
-            tcp_socket.async_wait(asio::socket_base::wait_type::wait_write, std::bind(&CurlMulti::AsioSocketActionCallback, this, act, s, socket_data, _1));
-        }
-    }
-    else if (act == CURL_POLL_INOUT)
-    {
-        if (socket_data->previous_action != CURL_POLL_IN && socket_data->previous_action != CURL_POLL_INOUT)
-        {
-            tcp_socket.async_wait(asio::socket_base::wait_type::wait_read, std::bind(&CurlMulti::AsioSocketActionCallback, this, act, s, socket_data, _1));
-        }
-        if (socket_data->previous_action != CURL_POLL_OUT && socket_data->previous_action != CURL_POLL_INOUT)
-        {
-            tcp_socket.async_wait(asio::socket_base::wait_type::wait_write, std::bind(&CurlMulti::AsioSocketActionCallback, this, act, s, socket_data, _1));
-        }
+        socket_data->read_armed = true;
+        tcp_socket.async_wait(asio::socket_base::wait_type::wait_read,
+            std::bind(&CurlMulti::AsioSocketActionCallback, this, CURL_POLL_IN, s, socket_data, _1));
     }
 
-    socket_data->previous_action = act;
+    if ((act & CURL_POLL_OUT) && !socket_data->write_armed)
+    {
+        socket_data->write_armed = true;
+        tcp_socket.async_wait(asio::socket_base::wait_type::wait_write,
+            std::bind(&CurlMulti::AsioSocketActionCallback, this, CURL_POLL_OUT, s, socket_data, _1));
+    }
 }

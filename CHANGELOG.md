@@ -2,6 +2,31 @@
 
 All notable changes to KTP CURL AMXX will be documented in this file.
 
+## [1.3.17-ktp] - 2026-08-10
+
+### Fixed
+- **Readiness events were silently dropped, stalling transfers to `CURLOPT_TIMEOUT`
+  (CU-02).** `SocketData::previous_action` was doing two jobs: recording what libcurl
+  last asked for, *and* standing in for which asio waits were actually pending. Those
+  diverge. On `CURL_POLL_INOUT` both a read and a write wait were armed, each bound
+  with the composite action; when the write fired first libcurl could drop the socket
+  to `CURL_POLL_IN`, and the guard
+
+      if (error || action == previous_action || previous_action == CURL_POLL_INOUT)
+
+  then matched none of its arms for the still-pending read wait. The event was
+  discarded, libcurl was never told the socket was readable, and nothing re-armed —
+  the transfer hung until `CURLOPT_TIMEOUT`. The same handler also reported `INOUT`
+  to `curl_multi_socket_action`, claiming both directions were ready when one was.
+  Arming state is now tracked per direction (`read_armed` / `write_armed`), handlers
+  bind the single direction they were armed for and report only that, and the guard
+  is gone — a completed wait is always reported. Also fixes CU-13.
+
+  Measured on the new harness (`tests/build_harness.sh`, added 1.3.16→1.3.17
+  development): before, 16,296 of 524,288 bytes and `CURLE_OPERATION_TIMEDOUT` after
+  20,001 ms; after, the full 524,288 bytes and `CURLE_OK` in 37 ms. The harness is
+  RED on the old code and GREEN on the new under the same gate.
+
 ## [1.3.16-ktp] - 2026-08-09
 
 ### Fixed

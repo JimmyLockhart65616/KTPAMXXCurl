@@ -10,7 +10,14 @@
 struct SocketData
 {
     bool is_ares_socket = false;
-    int previous_action = CURL_POLL_NONE; // CURL_POLL_IN, CURL_POLL_OUT, etc
+    int previous_action = CURL_POLL_NONE; // what libcurl last asked for
+
+    // What is actually pending on asio, which previous_action cannot express:
+    // libcurl can move a socket INOUT->IN while the INOUT-armed write wait is
+    // still outstanding. Deriving armed-ness from previous_action instead is
+    // what dropped readiness events and stalled transfers to CURLOPT_TIMEOUT.
+    bool read_armed = false;
+    bool write_armed = false;
 };
 
 using SocketDataPtr = std::shared_ptr<SocketData>;
@@ -44,7 +51,12 @@ private:
     CurlMulti(const CurlMulti& curl_multi);
     void CheckMultiInfo();
     void SetSock(int act, curl_socket_t s, SocketDataPtr socketData);
-    void AsioSocketActionCallback(int act, curl_socket_t s, SocketDataPtr socketData, const asio::error_code& error);
+    // Arms whichever direction libcurl wants and is not already pending.
+    void ArmWaits(int act, curl_socket_t s, SocketDataPtr socketData);
+    // `dir` is ONE of CURL_POLL_IN / CURL_POLL_OUT — the direction this handler
+    // was armed for, never the composite. A handler that cannot say which way it
+    // fired cannot report the right readiness to libcurl.
+    void AsioSocketActionCallback(int dir, curl_socket_t s, SocketDataPtr socketData, const asio::error_code& error);
     void AsioTimerCallback(const asio::error_code& error);
 
 private:
