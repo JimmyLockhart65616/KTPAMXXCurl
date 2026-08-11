@@ -10,19 +10,24 @@ Part of the [KTP Competitive Infrastructure](https://github.com/afraznein).
 
 ## What's New in v1.3.17-ktp
 
-Correctness on handle reuse and on reading a transfer back. A reused easy handle
-no longer returns the previous transfer's body concatenated with the new one (and
-no longer pins itself at the body cap, returning truncated output from then on);
-a failed callback re-registration no longer leaves a freed forward id that AMXX
-can recycle for an unrelated forward; and every `curl_easy_getinfo` branch now
-initializes its local and gates the writeback on `CURLE_OK`. That last one
-mattered most for `CURLINFO_SLIST`, which handed Pawn an uninitialized pointer
-that `curl_slist_free_all` would free — though the one a third party could
-actually reach was `CURLINFO_STRING`: it passed libcurl's `char*` to
-`MF_SetAmxString` unchecked, and libcurl returns `CURLE_OK` with a null pointer
-for an absent header, so a remote server omitting `Content-Type` was enough to
-segfault the game thread. Module-internal only — no plugin recompile
-(no `.inc` or native-signature change).
+Transfers no longer stall to `CURLOPT_TIMEOUT` on a dropped readiness event.
+Internally the module tracked "which socket waits are pending" using the same
+field that recorded "what libcurl last asked for" — and those two diverge. When
+libcurl wanted both directions at once and then narrowed to one, a still-pending
+wait for the other direction fired against a mismatched state and was silently
+discarded: libcurl was never told the socket was readable, nothing re-armed, and
+the transfer hung until it timed out. Pending waits are now tracked per direction,
+each handler knows which direction it was armed for and reports only that one, and
+the discard path is gone. In practice this was reachable by any transfer large
+enough to want a read and a write in the same moment — Discord embeds, HLStatsX
+posts and the HLTV API all qualify — and it presents as a `CURLE_OPERATION_TIMEDOUT`
+with a partial body, not as an error the plugin can see.
+
+This release also adds the module's first test. `tests/build_harness.sh` drives the
+real socket layer against a loopback HTTP server with no AMXX and no HLDS; it is
+RED on the previous build and GREEN on this one. It builds out-of-tree and stages
+nothing. Module-internal only — no plugin recompile (no `.inc` or
+native-signature change).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history. Behavior worth knowing
 about that arrived in earlier releases is documented as current behavior under

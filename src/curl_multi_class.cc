@@ -180,6 +180,16 @@ int CurlMulti::CurlCloseSocketCallback(curl_socket_t item)
         socket_map_.erase(item);
     }
 
+    // Erase the SocketData with it. CurlOpenSocketCallback already does this on its
+    // stale path for previous_action; read_armed/write_armed make it worse. If a
+    // close arrives without a preceding CURL_POLL_REMOVE and the kernel recycles the
+    // fd, the new connection reuses the OLD SocketData with its flags still set, so
+    // ArmWaits arms nothing and the aborted handler from the previous generation
+    // clears the flag afterwards without re-arming -- a stall with no way out. The
+    // stale-entry WARNING cannot catch it either: that tripwire keys on
+    // socket_map_, which this function just emptied.
+    socket_data_map_.erase(item);
+
     DEBUG_LOG("Curl | close socket %d\n", item);
 
     return 0;
@@ -328,10 +338,13 @@ void CurlMulti::AsioSocketActionCallback(int dir, curl_socket_t s, SocketDataPtr
     // This wait is done — fired, cancelled or errored. Clear before ANY early
     // return: a flag left set makes the direction look permanently armed and
     // nothing ever re-arms it.
+    // Explicit on both arms rather than an else: the whole bug being fixed here is a
+    // value meaning one thing and being used as another, so a stray `dir` must clear
+    // nothing rather than silently clear the write side.
     if (socket_data)
     {
-        if (dir == CURL_POLL_IN) socket_data->read_armed  = false;
-        else                     socket_data->write_armed = false;
+        if (dir == CURL_POLL_IN)       socket_data->read_armed  = false;
+        else if (dir == CURL_POLL_OUT) socket_data->write_armed = false;
     }
 
     // Destroyed while a wait was pending (shutdown) — the bound `this` is gone.
@@ -485,17 +498,24 @@ void CurlMulti::ArmWaits(int act, curl_socket_t s, SocketDataPtr socket_data)
     // Bind the DIRECTION, not `act`: an INOUT-armed handler could not tell libcurl
     // which way it fired and reported both, claiming readiness that never happened.
     // shared_ptr into the handler prevents use-after-free.
+    // Flag is set AFTER async_wait, never before: async_wait allocates and can
+    // throw under memory pressure. Set first, a throw leaves the direction marked
+    // armed with no wait pending and nothing able to clear it -- no handler will
+    // ever run -- so ArmWaits skips it forever and the transfer stalls to
+    // CURLOPT_TIMEOUT. That is the exact defect this release removes, resurrected.
+    // Reordering is safe: asio never invokes the handler from inside the
+    // initiating call, so nothing can observe the flag in between.
     if ((act & CURL_POLL_IN) && !socket_data->read_armed)
     {
-        socket_data->read_armed = true;
         tcp_socket.async_wait(asio::socket_base::wait_type::wait_read,
             std::bind(&CurlMulti::AsioSocketActionCallback, this, CURL_POLL_IN, s, socket_data, _1));
+        socket_data->read_armed = true;
     }
 
     if ((act & CURL_POLL_OUT) && !socket_data->write_armed)
     {
-        socket_data->write_armed = true;
         tcp_socket.async_wait(asio::socket_base::wait_type::wait_write,
             std::bind(&CurlMulti::AsioSocketActionCallback, this, CURL_POLL_OUT, s, socket_data, _1));
+        socket_data->write_armed = true;
     }
 }

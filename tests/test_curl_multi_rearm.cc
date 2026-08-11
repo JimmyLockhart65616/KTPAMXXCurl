@@ -28,16 +28,16 @@
 // while the server replies with a body larger than one read.
 //
 // RED/GREEN CONTRACT
-//   RED  -> a readiness event was dropped; the re-arm defect is live. On the
-//           current build that surfaces as CURLE_OPERATION_TIMEDOUT after
-//           ~16 KB of 512 -- but the dropped-event count, not the timeout, is
-//           the assertion: libcurl's timer can re-drive a dropped socket, so a
-//           completion check alone passes straight through the defect.
-//   GREEN -> INOUT was exercised and no event was dropped.
-// A pass is only meaningful if the INOUT transition actually occurred, so the
-// harness asserts it was observed and fails loudly if it never happened --
-// otherwise a green run could mean "the bug is fixed" or "we never exercised
-// it", which are not the same result.
+//   RED   -> the transfer did not complete cleanly. On the pre-fix build that is
+//            CURLE_OPERATION_TIMEDOUT after ~16 KB of 512, sitting at the full
+//            CURLOPT_TIMEOUT -- the dropped read event is never re-driven.
+//   GREEN -> the transfer completed well inside the timeout.
+// The gate asserts the transfer, NOT a dropped-event count: after the fix there is
+// no drop to count, because arming is tracked per direction and a completed wait is
+// always reported. A completion check is only meaningful if the INOUT overlap
+// actually formed, so build_harness.sh asserts that separately and treats its
+// absence as INCONCLUSIVE rather than PASS -- otherwise green could mean "fixed" or
+// "never exercised", which are not the same result.
 #include <atomic>
 #include <memory>
 #include <chrono>
@@ -56,6 +56,7 @@ namespace {
 constexpr std::size_t kUploadBytes = 512 * 1024;    // exceeds one socket write
 constexpr std::size_t kDownloadBytes = 512 * 1024;  // exceeds one socket read
 constexpr int kTimeoutSeconds = 20;
+constexpr long kMaxHealthyMs = 5000;
 
 int g_exit = 0;
 
@@ -139,6 +140,7 @@ int main()
 
     long elapsed = 0;
     bool completed = false;
+    curl_slist* headers = nullptr;
 
     // Scoped so Curl/CurlMulti destruct -- and with them curl_easy_cleanup and
     // curl_multi_cleanup -- BEFORE curl_global_cleanup(). Calling any libcurl API
@@ -163,7 +165,7 @@ int main()
         // upload against the download so the INOUT overlap never forms and the
         // run comes back CURLE_OK in ~1s, masking the defect entirely. With it
         // suppressed the same build stalls to CURLOPT_TIMEOUT on 16 KB of 512.
-        curl_slist* headers = curl_slist_append(nullptr, "Expect:");
+        headers = curl_slist_append(nullptr, "Expect:");
 
         curl.SetOption(CURLOPT_URL, url.c_str());
         curl.SetOption(CURLOPT_HTTPHEADER, headers);
@@ -201,14 +203,19 @@ int main()
         Check(completed, "completion callback fired (poller kept running)");
         Check(result == (int)CURLE_OK, "CURLcode is CURLE_OK");
         Check(cb->body.size() == kDownloadBytes, "full response body received");
-        Check(elapsed < kTimeoutSeconds * 1000,
-              "completed well inside CURLOPT_TIMEOUT (a stall would sit at the timeout)");
+        // Not `< kTimeoutSeconds * 1000`: that also passes a merely-degraded run.
+        // A clean transfer here is tens of ms, so 5 s is still ~100x headroom.
+        Check(elapsed < kMaxHealthyMs,
+              "completed well inside CURLOPT_TIMEOUT (a stall sits at the timeout)");
 
         multi.RemoveCurl(curl);
         multi.Shutdown();
-        // After RemoveCurl: libcurl must not be holding the list any more.
-        curl_slist_free_all(headers);
     }
+    // AFTER the scope: ~Curl ran curl_easy_cleanup, so the easy handle has released
+    // CURLOPT_HTTPHEADER. Freeing before that leaves libcurl holding a dangling
+    // slist -- inert here, but this module has a shared-slist incident history and
+    // this is its reference test.
+    curl_slist_free_all(headers);
 
     if (server.joinable()) server.join();
     curl_global_cleanup();
