@@ -4,6 +4,8 @@ All notable changes to KTP CURL AMXX will be documented in this file.
 
 ## [1.3.17-ktp] - 2026-08-10
 
+Shipped binary `amxxcurl_ktp_i386.so` md5 **214ec285d706855909962e3e40d47d1a** (built from a clean tree at the commit that ships it; this module's `build_linux.sh` does not bake the git SHA, so the pin is reproducible).
+
 ### Fixed
 - **Readiness events were silently dropped, stalling transfers to `CURLOPT_TIMEOUT`
   (CU-02).** `SocketData::previous_action` was doing two jobs: recording what libcurl
