@@ -18,17 +18,42 @@ for tool in cmake make gcc; do
     fi
 done
 
+# Reference mtime: the artifact must be NEWER than this, so a stale .so left in
+# build/ can never be mistaken for a fresh one. `set -e` alone already stops a
+# failed make here, but it does so SILENTLY -- no banner, and the "BUILD FAILED!"
+# branch below was unreachable. A failed build that prints nothing reads like a
+# short success in a scrollback, which is how a stale artifact gets shipped.
+BUILD_STAMP="$(mktemp)"
+trap 'rm -f "$BUILD_STAMP"' EXIT
+
 # Clean and build
 rm -rf build
 mkdir -p build
 cd build
+set +e
 cmake .. -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
-make -j$(nproc)
+CMAKE_RC=$?
+if [ "$CMAKE_RC" -eq 0 ]; then
+    make -j$(nproc)
+    BUILD_RC=$?
+else
+    BUILD_RC=$CMAKE_RC
+fi
+set -e
 cd ..
 
-# Check if build succeeded
+if [ "$BUILD_RC" -ne 0 ]; then
+    echo ""
+    echo "========================================"
+    echo "BUILD FAILED! (exit $BUILD_RC)"
+    echo "========================================"
+    echo "Nothing has been staged."
+    exit 1
+fi
+
+# Check if build succeeded -- on the ARTIFACT, and on it being ours.
 BINARY_PATH="build/amxxcurl_ktp_i386.so"
-if [ -f "$BINARY_PATH" ]; then
+if [ -f "$BINARY_PATH" ] && [ "$BINARY_PATH" -nt "$BUILD_STAMP" ]; then
     echo ""
     echo "========================================"
     echo "BUILD SUCCESS!"
@@ -36,8 +61,9 @@ if [ -f "$BINARY_PATH" ]; then
     echo "Binary: $BINARY_PATH"
     ls -lh "$BINARY_PATH"
 
-    # Deploy to staging folder
-    DEPLOY_DIR="/mnt/n/Nein_/KTP Git Projects/KTP DoD Server/serverfiles"
+    # Deploy to staging folder. Overridable so a test run can stage somewhere
+    # harmless instead of over an artifact whose md5 is pinned to a shipped build.
+    DEPLOY_DIR="${KTP_STAGING_DIR:-/mnt/n/Nein_/KTP Git Projects/KTP DoD Server/serverfiles}"
     if [ -d "$DEPLOY_DIR" ]; then
         echo ""
         if [ -n "${KTP_NO_STAGE:-}" ]; then
@@ -46,14 +72,26 @@ if [ -f "$BINARY_PATH" ]; then
         else
             echo "Deploying to staging folder..."
             mkdir -p "$DEPLOY_DIR/dod/addons/ktpamx/modules"
-            cp "$BINARY_PATH" "$DEPLOY_DIR/dod/addons/ktpamx/modules/"
-            echo "  -> Copied amxxcurl_ktp_i386.so"
+            if ! cp "$BINARY_PATH" "$DEPLOY_DIR/dod/addons/ktpamx/modules/"; then
+                echo "ERROR: failed to copy $BINARY_PATH into the staging tree."
+                exit 1
+            fi
+            echo "  -> Copied amxxcurl_ktp_i386.so  (md5 $(md5sum "$BINARY_PATH" | cut -d' ' -f1))"
             echo ""
             echo "Files staged at: $DEPLOY_DIR/dod/addons/ktpamx/modules/"
         fi
     fi
 else
     echo ""
+    echo "========================================"
     echo "BUILD FAILED!"
+    echo "========================================"
+    if [ -f "$BINARY_PATH" ]; then
+        echo "$BINARY_PATH exists but predates this run -- the compile did not"
+        echo "produce it. Refusing to stage a stale artifact."
+    else
+        echo "No amxxcurl_ktp_i386.so was produced."
+    fi
+    echo "Nothing has been staged."
     exit 1
 fi
